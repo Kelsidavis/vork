@@ -1,0 +1,35 @@
+# Qwen3 Coder 30B - Maximum GPU Utilization
+# All 49/49 layers on GPU with optimal context size
+# Total VRAM: ~21.7GB (RTX 5080: 11.9GB + RTX 3060: 8.0GB)
+
+default_backend = "llamacpp"
+
+[assistant]
+server_url = "http://localhost:8080"
+model = "Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+require_git_repo = false
+
+[llamacpp]
+enabled = true
+models_dir = "/media/k/vbox/models/Qwen3"
+binary_path = "/home/k/llama.cpp/build/bin/llama-server"
+context_size = 6144
+ngl = 49  # All layers on GPU
+threads = 20
+batch_size = 170
+parallel = 4
+cache_type_k = "bf16"
+cache_type_v = "bf16"
+
+# Startup command:
+# /home/k/llama.cpp/build/bin/llama-server \
+#   -m /media/k/vbox/models/Qwen3/Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf \
+#   --host 0.0.0.0 --port 8080 \
+#   -c 6144 -ngl 49 -t 20 -b 170 --parallel 4 \
+#   --cache-type-k bf16 --cache-type-v bf16 --jinja
+
+[ollama]
+enabled = true
+api_url = "http://localhost:11434"

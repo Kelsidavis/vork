@@ -201,8 +201,25 @@ Vork stores its configuration in `~/.vork/`:
 │   ├── default.json
 │   ├── rust-expert.json
 │   └── ...
+├── presets/             # Pre-configured model setups
+│   ├── qwen3-14b-large-context.toml
+│   ├── qwen3-30b-max-gpu.toml
+│   └── README.md
 └── sessions/            # Saved conversations
     └── *.json
+```
+
+### Model Presets
+
+Vork includes optimized presets for different use cases. See [presets/README.md](presets/README.md) for details.
+
+**Quick switch:**
+```bash
+# Use 14B with 72k context (default)
+cp presets/qwen3-14b-large-context.toml ~/.vork/config.toml
+
+# Use 30B for maximum quality
+cp presets/qwen3-30b-max-gpu.toml ~/.vork/config.toml
 ```
 
 ### Configuration File
