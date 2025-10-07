@@ -112,9 +112,16 @@ impl ServerManager {
         println!("  {} {}", "Port:".cyan(), port);
         println!();
 
+        // Use split-mode "none" if forcing to single GPU, otherwise "layer"
+        let split_mode = if cfg.cuda_visible_devices.is_some() {
+            "none"
+        } else {
+            "layer"
+        };
+
         // Start the server process with output redirected to /dev/null
-        let child = Command::new(binary)
-            .arg("-m")
+        let mut cmd = Command::new(binary);
+        cmd.arg("-m")
             .arg(&model_path)
             .arg("--host")
             .arg("0.0.0.0")
@@ -126,12 +133,17 @@ impl ServerManager {
             .arg(cfg.batch_size.to_string())
             .arg("-ngl")
             .arg(cfg.ngl.to_string())
-            .arg("--main-gpu")
-            .arg("1")
             .arg("--alias")
             .arg(model_name)
             .arg("--split-mode")
-            .arg("layer")
+            .arg(split_mode);
+
+        // Set main GPU if cuda_visible_devices is specified
+        if let Some(ref gpu_index) = cfg.cuda_visible_devices {
+            cmd.arg("--main-gpu").arg(gpu_index);
+        }
+
+        let child = cmd
             .arg("--jinja")
             .arg("--temp")
             .arg("0.6")
