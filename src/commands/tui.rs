@@ -124,6 +124,7 @@ struct App {
     messages: Vec<(String, String)>, // (role, content)
     scroll: u16,
     input_scroll: u16,  // Vertical scroll offset for input box
+    auto_scroll: bool,  // Auto-scroll to follow new messages
     session: Session,
     client: LlamaClient,
     approval_system: ApprovalSystem,
@@ -216,6 +217,7 @@ impl App {
             messages: vec![],
             scroll: 0,
             input_scroll: 0,
+            auto_scroll: true,  // Start with auto-scroll enabled
             session,
             client,
             approval_system,
@@ -282,8 +284,10 @@ impl App {
             "💭 Thinking...".to_string(),
         ));
 
-        // Auto-scroll to bottom so user sees the messages
-        self.scroll = u16::MAX;
+        // Auto-scroll to bottom so user sees the messages (only if auto-scroll enabled)
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
     }
 
     // Do the actual LLM work (async part)
@@ -480,8 +484,10 @@ impl App {
         self.session.save()?;
         self.processing = false;
 
-        // Auto-scroll to bottom after new messages
-        self.scroll = u16::MAX;
+        // Auto-scroll to bottom after new messages (only if auto-scroll enabled)
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
 
         let (used, max, percentage) = self.session.conversation.get_context_usage();
         self.status = format!(
@@ -594,7 +600,9 @@ impl App {
                 msg_count_before, self.session.conversation.messages.len(), saved_tokens)
         ));
 
-        self.scroll = u16::MAX; // Auto-scroll to bottom
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
         self.session.save()?;
         Ok(())
     }
@@ -618,7 +626,9 @@ impl App {
             "🔧 Model Selection Mode: Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel".to_string()
         ));
 
-        self.scroll = u16::MAX; // Auto-scroll to bottom
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
         Ok(())
     }
 
@@ -675,7 +685,9 @@ impl App {
                 "system".to_string(),
                 "✅ Model selection set to AUTO - agents will use their preferred models".to_string()
             ));
-            self.scroll = u16::MAX;
+            if self.auto_scroll {
+                self.scroll = u16::MAX;
+            }
             return Ok(());
         }
 
@@ -705,7 +717,9 @@ impl App {
             }
         }
 
-        self.scroll = u16::MAX; // Auto-scroll to bottom
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
         Ok(())
     }
 
@@ -756,7 +770,9 @@ impl App {
             }
         }
 
-        self.scroll = u16::MAX; // Auto-scroll to bottom
+        if self.auto_scroll {
+            self.scroll = u16::MAX;
+        }
         Ok(())
     }
 
@@ -973,19 +989,23 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
                         KeyCode::PageUp => {
-                            // Scroll up
+                            // Scroll up - disable auto-scroll
+                            app.auto_scroll = false;
                             app.scroll = app.scroll.saturating_sub(5);
                         }
                         KeyCode::PageDown => {
-                            // Scroll down
+                            // Scroll down - disable auto-scroll
+                            app.auto_scroll = false;
                             app.scroll = app.scroll.saturating_add(5);
                         }
                         KeyCode::Home => {
-                            // Scroll to top
-                            app.scroll = 0;
+                            // Return to bottom and resume auto-scroll
+                            app.auto_scroll = true;
+                            app.scroll = u16::MAX;
                         }
                         KeyCode::End => {
-                            // Scroll to bottom (will be clamped in render)
+                            // Scroll to bottom and enable auto-scroll
+                            app.auto_scroll = true;
                             app.scroll = u16::MAX;
                         }
                         _ => {}
@@ -998,9 +1018,13 @@ async fn run_app<B: ratatui::backend::Backend>(
                 Event::Mouse(mouse) => {
                     match mouse.kind {
                         event::MouseEventKind::ScrollUp => {
+                            // Scroll up - disable auto-scroll
+                            app.auto_scroll = false;
                             app.scroll = app.scroll.saturating_sub(3);
                         }
                         event::MouseEventKind::ScrollDown => {
+                            // Scroll down - disable auto-scroll
+                            app.auto_scroll = false;
                             app.scroll = app.scroll.saturating_add(3);
                         }
                         event::MouseEventKind::Down(MouseButton::Right) => {
@@ -1148,11 +1172,17 @@ fn ui(f: &mut Frame, app: &App) {
 
     // Scroll position already clamped in run_app
 
+    let conversation_title = if app.auto_scroll {
+        "Conversation (Auto-scroll ON | Home/End: scroll to bottom | PgUp/PgDn: manual scroll)"
+    } else {
+        "Conversation (Auto-scroll OFF | Home/End: return to bottom & resume auto-scroll)"
+    };
+
     let messages_widget = List::new(messages)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Conversation (Scroll: PgUp/PgDn/Mouse | Copy: Shift+Select)"),
+                .title(conversation_title),
         )
         .style(Style::default().fg(Color::White));
 
