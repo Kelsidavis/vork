@@ -121,6 +121,7 @@ pub fn execute(list: bool, create: bool, agent_name: Option<String>) -> Result<(
             tools_enabled,
             color,
             title,
+            preferred_preset: None,
         };
 
         agent.save()?;

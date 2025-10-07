@@ -78,6 +78,67 @@ impl LlamaCppBackend {
             .to_lowercase()
             .replace(['_', '-', '.'], "-")
     }
+
+    pub fn start_server(port: u16) -> Result<()> {
+        // Load fresh config
+        let config = Config::load()?;
+        let backend = Self { config };
+
+        let binary = backend
+            .find_binary()
+            .ok_or_else(|| anyhow::anyhow!("llama.cpp binary not found"))?;
+
+        // Get the model from config
+        let model = &backend.config.assistant.model;
+
+        // Find the model file
+        let models = backend.scan_models_dir()?;
+        let model_path = models
+            .iter()
+            .find(|p| backend.get_model_alias(p).contains(model) || p.file_name().and_then(|n| n.to_str()).map(|n| n.contains(model)).unwrap_or(false))
+            .ok_or_else(|| anyhow::anyhow!("Model '{}' not found", model))?;
+
+        let cfg = &backend.config.llamacpp;
+
+        let mut cmd = Command::new(&binary);
+
+        // Use split-mode "none" if forcing to single GPU, otherwise "layer"
+        let split_mode = if cfg.cuda_visible_devices.is_some() {
+            "none"
+        } else {
+            "layer"
+        };
+
+        cmd.arg("-m").arg(model_path)
+            .arg("--host").arg("0.0.0.0")
+            .arg("--port").arg(port.to_string())
+            .arg("-c").arg(cfg.context_size.to_string())
+            .arg("--batch-size").arg(cfg.batch_size.to_string())
+            .arg("-ngl").arg(cfg.ngl.to_string())
+            .arg("--alias").arg(model)
+            .arg("--split-mode").arg(split_mode)
+            .arg("--jinja")
+            .arg("--temp").arg("0.6")
+            .arg("--top-p").arg("0.9")
+            .arg("--min-p").arg("0.05")
+            .arg("--repeat-penalty").arg("1.1")
+            .arg("--repeat-last-n").arg("256")
+            .arg("--no-warmup")
+            .arg("-t").arg(cfg.threads.to_string())
+            .arg("--verbose");
+
+        // Set main GPU if cuda_visible_devices is specified
+        // Note: cuda_visible_devices is used as the main GPU index
+        if let Some(ref gpu_index) = cfg.cuda_visible_devices {
+            cmd.arg("--main-gpu").arg(gpu_index);
+        }
+
+        // Spawn in background
+        cmd.spawn()
+            .context("Failed to spawn llama-server")?;
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -148,6 +209,14 @@ impl Backend for LlamaCppBackend {
         println!();
 
         let mut cmd = Command::new(&binary);
+
+        // Use split-mode "none" if forcing to single GPU, otherwise "layer"
+        let split_mode = if cfg.cuda_visible_devices.is_some() {
+            "none"
+        } else {
+            "layer"
+        };
+
         cmd.arg("-m").arg(model_path)
             .arg("--host").arg("0.0.0.0")
             .arg("--port").arg(port.to_string())
@@ -155,7 +224,7 @@ impl Backend for LlamaCppBackend {
             .arg("--batch-size").arg(cfg.batch_size.to_string())
             .arg("-ngl").arg(cfg.ngl.to_string())
             .arg("--alias").arg(model)
-            .arg("--split-mode").arg("layer")
+            .arg("--split-mode").arg(split_mode)
             .arg("--jinja")
             .arg("--temp").arg("0.6")
             .arg("--top-p").arg("0.9")
@@ -165,6 +234,12 @@ impl Backend for LlamaCppBackend {
             .arg("--no-warmup")
             .arg("-t").arg(cfg.threads.to_string())
             .arg("--verbose");
+
+        // Set main GPU if cuda_visible_devices is specified
+        // Note: cuda_visible_devices is used as the main GPU index
+        if let Some(ref gpu_index) = cfg.cuda_visible_devices {
+            cmd.arg("--main-gpu").arg(gpu_index);
+        }
 
         println!("{} {:?}", "Executing:".green().bold(), cmd);
         println!();

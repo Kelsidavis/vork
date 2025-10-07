@@ -16,6 +16,7 @@ enabled = true
 models_dir = "/media/k/vbox/models/Qwen3"
 binary_path = "/home/k/llama.cpp/build/bin/llama-server"
 context_size = 73728  # 72k context - maximum that fits in VRAM
+context_limit = 65536  # Compact when conversation exceeds this (leave buffer for processing)
 ngl = 99  # All layers on GPU
 threads = 20
 batch_size = 512

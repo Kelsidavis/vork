@@ -20,6 +20,36 @@ use crate::llm::{LlamaClient, ServerManager, Session, ApprovalSystem};
 use crate::llm::tools::{get_available_tools, execute_tool};
 use crate::agents::Agent;
 
+fn detect_current_preset(config: &Config) -> String {
+    // Try to match current config against available presets
+    if let Ok(config_dir) = Config::config_dir() {
+        let presets_dir = config_dir.join("presets");
+        if let Ok(entries) = std::fs::read_dir(&presets_dir) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|s| s.to_str()) == Some("toml") {
+                    if let Some(name) = entry.path().file_stem() {
+                        let name_str = name.to_string_lossy();
+                        if name_str == "README" {
+                            continue;
+                        }
+                        // Read preset and compare key fields
+                        if let Ok(preset_content) = std::fs::read_to_string(entry.path()) {
+                            if let Ok(preset_config) = toml::from_str::<Config>(&preset_content) {
+                                // Match on context_size and cuda_visible_devices as key identifiers
+                                if preset_config.llamacpp.context_size == config.llamacpp.context_size
+                                    && preset_config.llamacpp.cuda_visible_devices == config.llamacpp.cuda_visible_devices {
+                                    return name_str.to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "custom".to_string()
+}
+
 fn parse_color(color_name: &str) -> Color {
     match color_name.to_lowercase().as_str() {
         "black" => Color::Black,
@@ -91,7 +121,6 @@ struct GpuStats {
 struct App {
     input: String,
     messages: Vec<(String, String)>, // (role, content)
-    #[allow(dead_code)]
     scroll: u16,
     session: Session,
     client: LlamaClient,
@@ -111,12 +140,18 @@ struct App {
     history_index: Option<usize>,
     current_input_backup: String,
     gpu_stats: Vec<GpuStats>,
+    model_selector_active: bool,
+    available_presets: Vec<String>,
+    selected_preset_index: usize,
+    model_override: Option<String>,  // None = auto, Some = forced preset
+    current_preset_name: String,  // Track current preset for display
 }
 
 impl App {
     fn new(server_url: String, model: String, config: Config, agent: Option<Agent>) -> Self {
         let working_dir = env::current_dir().unwrap_or_default();
         let mut session = Session::new(working_dir);
+        session.conversation.set_max_context(config.llamacpp.context_limit);
         let client = LlamaClient::new(server_url.clone(), model.clone());
         let approval_system = ApprovalSystem::new(
             config.assistant.approval_policy.clone(),
@@ -133,7 +168,7 @@ impl App {
         let header_title = if let Some(ref agent) = agent {
             agent.title.clone().unwrap_or_else(|| format!("🤖 {}", agent.name))
         } else {
-            "🚀 VORK - AI Coding Assistant".to_string()
+            "🐴 VORK - AI Coding Assistant".to_string()
         };
 
         // Use agent's system prompt if provided
@@ -147,6 +182,33 @@ impl App {
             String::new()
         };
 
+        // Find available presets - automatically discover all .toml files in presets directory
+        let mut available_presets = vec!["auto".to_string()];  // Start with "auto" option
+        if let Ok(config_dir) = Config::config_dir() {
+            let presets_dir = config_dir.join("presets");
+            if presets_dir.exists() {
+                if let Ok(entries) = std::fs::read_dir(&presets_dir) {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.path().file_stem() {
+                            if entry.path().extension().and_then(|s| s.to_str()) == Some("toml")
+                                && name != "README" {
+                                available_presets.push(name.to_string_lossy().to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Sort presets but keep "auto" first
+        let mut other_presets = available_presets[1..].to_vec();
+        other_presets.sort();
+        available_presets = vec!["auto".to_string()];
+        available_presets.extend(other_presets);
+
+        // Detect current preset by comparing config file
+        let current_preset_name = detect_current_preset(&config);
+        let context_info = format!("{}k ctx", config.llamacpp.context_size / 1024);
+
         let mut app = Self {
             input: String::new(),
             messages: vec![],
@@ -154,7 +216,7 @@ impl App {
             session,
             client,
             approval_system,
-            status: format!("Connected to {} | Model: {}{}", server_url, model, agent_info),
+            status: format!("Preset: {} ({}) | Mode: auto{}", current_preset_name, context_info, agent_info),
             tokens_used: 0,
             processing: false,
             spinner_state: 0,
@@ -168,6 +230,11 @@ impl App {
             history_index: None,
             current_input_backup: String::new(),
             gpu_stats: vec![],
+            model_selector_active: false,
+            available_presets,
+            selected_preset_index: 0,
+            model_override: None,  // Start in auto mode
+            current_preset_name: current_preset_name.clone(),
         };
 
         // Add system message with agent info
@@ -202,11 +269,48 @@ impl App {
                 self.agent_color = parse_color(&agent.color);
                 self.header_title = agent.title.clone().unwrap_or_else(|| format!("🤖 {}", agent.name));
 
-                // Show agent selection message
-                self.messages.push((
-                    "system".to_string(),
-                    format!("🎯 Auto-selected agent: {} - {}", agent.name, agent.description),
-                ));
+                // Switch model preset if agent has a preference AND no manual override is set
+                if self.model_override.is_none() {
+                    if let Some(ref preferred_preset) = agent.preferred_preset {
+                        // Attempt to switch preset (no intermediate messages during switch)
+                        if let Err(e) = self.switch_to_preset(preferred_preset).await {
+                            self.messages.push((
+                                "system".to_string(),
+                                format!("🎯 Agent: {} - {} | ⚠️  Failed to switch model: {}",
+                                    agent.name, agent.description, e),
+                            ));
+                        } else {
+                            // Update current preset tracking
+                            self.current_preset_name = preferred_preset.clone();
+
+                            // Update status bar
+                            if let Ok(config) = Config::load() {
+                                let context_info = format!("{}k ctx", config.llamacpp.context_size / 1024);
+                                self.status = format!("Preset: {} ({}) | Mode: auto", preferred_preset, context_info);
+                            }
+
+                            // Single message after successful switch
+                            self.messages.push((
+                                "system".to_string(),
+                                format!("🎯 Agent: {} - {} | ✅ Model: {}",
+                                    agent.name, agent.description, preferred_preset),
+                            ));
+                        }
+                    } else {
+                        // Show agent selection message
+                        self.messages.push((
+                            "system".to_string(),
+                            format!("🎯 Auto-selected agent: {} - {}", agent.name, agent.description),
+                        ));
+                    }
+                } else {
+                    // Model override is set, don't auto-switch
+                    self.messages.push((
+                        "system".to_string(),
+                        format!("🎯 Auto-selected agent: {} - {} (using forced model: {})",
+                            agent.name, agent.description, self.model_override.as_ref().unwrap()),
+                    ));
+                }
             }
             self.first_message = false;
         }
@@ -302,10 +406,17 @@ impl App {
                     }
                 }
 
-                // Filter out slot access messages
+                // Filter out llama.cpp internal slot messages only
                 let filtered_content: String = content
                     .lines()
-                    .filter(|line| !line.contains("slot") && !line.trim().is_empty())
+                    .filter(|line| {
+                        let line_lower = line.to_lowercase();
+                        // Only filter lines that look like llama.cpp internal messages
+                        !line_lower.starts_with("slot ") &&
+                        !line_lower.contains("slot processing") &&
+                        !line_lower.contains("slot released") &&
+                        !line.trim().is_empty()
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
 
@@ -316,7 +427,19 @@ impl App {
                         .conversation
                         .add_assistant_message(filtered_content.clone());
                     total_tokens += filtered_content.len() / 4; // Rough estimate
+                } else if content.trim().is_empty() {
+                    // If content is empty or only whitespace, show a warning
+                    self.messages.push((
+                        "system".to_string(),
+                        "⚠️  Assistant sent empty response - this may indicate a model issue".to_string()
+                    ));
                 }
+            } else {
+                // No content at all in the response
+                self.messages.push((
+                    "system".to_string(),
+                    "⚠️  No content in response - model may have sent only tool calls or empty message".to_string()
+                ));
             }
 
             break;
@@ -329,15 +452,292 @@ impl App {
         }
         self.tokens_used += total_tokens;
 
+        // Compact conversation if needed
+        let compacted = self.session.conversation.compact_if_needed(&self.client).await?;
+        if compacted {
+            self.messages.push((
+                "system".to_string(),
+                "🔄 Context compaction completed: Older messages have been summarized to save space while preserving key information.".to_string()
+            ));
+        }
+
         self.session.save()?;
         self.processing = false;
+
+        // Auto-scroll to bottom after new messages
+        self.scroll = u16::MAX;
+
+        let (used, max, percentage) = self.session.conversation.get_context_usage();
         self.status = format!(
-            "Session: {} | Messages: {} | Tokens: {}",
+            "Session: {} | Messages: {} | Tokens: {} | Context: {}/{}tok ({:.1}%)",
             self.session.id,
             self.messages.len(),
-            self.tokens_used
+            self.tokens_used,
+            used,
+            max,
+            percentage
         );
 
+        Ok(())
+    }
+
+    async fn handle_compact_command(&mut self) -> Result<()> {
+        self.input.clear();
+
+        let msg_count_before = self.session.conversation.messages.len();
+        let (used_before, _, _) = self.session.conversation.get_context_usage();
+
+        // Force compaction even if below threshold
+        if self.session.conversation.messages.len() <= 11 {
+            self.messages.push((
+                "system".to_string(),
+                "❌ Cannot compact: Need at least 12 messages (system prompt + at least 11 messages) to perform compaction.".to_string()
+            ));
+            return Ok(());
+        }
+
+        self.messages.push((
+            "system".to_string(),
+            "🔄 Starting manual context compaction...".to_string()
+        ));
+
+        // Temporarily override the needs_compaction check by setting a flag
+        let system_msg = self.session.conversation.messages[0].clone();
+        let messages_to_compact: Vec<_> = self.session.conversation.messages.iter()
+            .skip(1)
+            .take(self.session.conversation.messages.len() - 11)
+            .cloned()
+            .collect();
+        let recent_messages: Vec<_> = self.session.conversation.messages.iter()
+            .skip(self.session.conversation.messages.len() - 10)
+            .cloned()
+            .collect();
+
+        if messages_to_compact.is_empty() {
+            self.messages.push((
+                "system".to_string(),
+                "❌ Cannot compact: Not enough messages to summarize.".to_string()
+            ));
+            return Ok(());
+        }
+
+        // Create summarization prompt
+        let conversation_text = messages_to_compact.iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let summary_prompt = format!(
+            "Summarize the following conversation history concisely, preserving key facts, decisions, and context. Focus on:\n\
+            - Important technical details and decisions\n\
+            - File modifications and their purposes\n\
+            - Commands executed and their results\n\
+            - Any errors or issues encountered\n\n\
+            Conversation:\n{}\n\n\
+            Provide a concise summary in 2-3 paragraphs:",
+            conversation_text
+        );
+
+        // Get summary from LLM
+        let response = self.client.chat_completion(vec![
+            super::super::llm::client::Message {
+                role: "user".to_string(),
+                content: summary_prompt,
+            }
+        ], None).await?;
+
+        let summary_response = response.choices[0].message.content.clone()
+            .unwrap_or_default();
+
+        // Rebuild conversation with summary
+        let summary_msg = super::super::llm::client::Message {
+            role: "assistant".to_string(),
+            content: format!("[Conversation summary of {} messages]\n\n{}",
+                messages_to_compact.len(), summary_response),
+        };
+
+        // Recalculate tokens
+        self.session.conversation.estimated_tokens =
+            (system_msg.content.len() / 4) + 10 +
+            (summary_msg.content.len() / 4) + 10;
+        for msg in &recent_messages {
+            self.session.conversation.estimated_tokens += (msg.content.len() / 4) + 10;
+        }
+
+        // Rebuild messages
+        self.session.conversation.messages = vec![system_msg, summary_msg];
+        self.session.conversation.messages.extend(recent_messages);
+
+        let (used_after, _, _) = self.session.conversation.get_context_usage();
+        let saved_tokens = used_before.saturating_sub(used_after);
+
+        self.messages.push((
+            "system".to_string(),
+            format!("✅ Compaction complete: {} messages → {} messages. Saved ~{} tokens.",
+                msg_count_before, self.session.conversation.messages.len(), saved_tokens)
+        ));
+
+        self.scroll = u16::MAX; // Auto-scroll to bottom
+        self.session.save()?;
+        Ok(())
+    }
+
+    async fn handle_model_command(&mut self) -> Result<()> {
+        self.input.clear();
+
+        if self.available_presets.is_empty() {
+            self.messages.push((
+                "system".to_string(),
+                "❌ No model presets found in ~/.vork/presets/".to_string()
+            ));
+            return Ok(());
+        }
+
+        // Activate model selector
+        self.model_selector_active = true;
+        self.messages.push((
+            "system".to_string(),
+            "🔧 Model Selection Mode: Use ↑/↓ arrows to navigate, Enter to select, Esc to cancel".to_string()
+        ));
+
+        self.scroll = u16::MAX; // Auto-scroll to bottom
+        Ok(())
+    }
+
+    async fn switch_to_preset(&mut self, preset_name: &str) -> Result<()> {
+        // Copy preset to config
+        let config_dir = Config::config_dir()?;
+        let presets_dir = config_dir.join("presets");
+        let preset_path = presets_dir.join(format!("{}.toml", preset_name));
+        let config_path = Config::config_path()?;
+
+        if !preset_path.exists() {
+            anyhow::bail!("Preset file not found: {:?}", preset_path);
+        }
+
+        // Copy preset to config for persistence
+        std::fs::copy(&preset_path, &config_path)
+            .context("Failed to copy preset to config")?;
+
+        // Kill existing llama-server
+        let _ = std::process::Command::new("pkill")
+            .arg("llama-server")
+            .output();
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        // Start new server with the new config
+        crate::backends::llamacpp::LlamaCppBackend::start_server(8080)?;
+
+        // Give server time to initialize
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        Ok(())
+    }
+
+    async fn confirm_model_selection(&mut self) -> Result<()> {
+        if self.available_presets.is_empty() {
+            return Ok(());
+        }
+
+        let preset_name = self.available_presets[self.selected_preset_index].clone();
+        self.model_selector_active = false;
+
+        // Handle "auto" selection
+        if preset_name == "auto" {
+            self.model_override = None;
+
+            // Update status to show auto mode
+            if let Ok(config) = Config::load() {
+                let context_info = format!("{}k ctx", config.llamacpp.context_size / 1024);
+                self.status = format!("Preset: {} ({}) | Mode: auto", self.current_preset_name, context_info);
+            }
+
+            self.messages.push((
+                "system".to_string(),
+                "✅ Model selection set to AUTO - agents will use their preferred models".to_string()
+            ));
+            self.scroll = u16::MAX;
+            return Ok(());
+        }
+
+        // Manual preset selection - set override and switch (no intermediate messages)
+        match self.switch_to_preset(&preset_name).await {
+            Ok(_) => {
+                // Set override so this model is used for all agents
+                self.model_override = Some(preset_name.clone());
+                self.current_preset_name = preset_name.clone();
+
+                // Reload config to get new context size
+                if let Ok(new_config) = Config::load() {
+                    let context_info = format!("{}k ctx", new_config.llamacpp.context_size / 1024);
+                    self.status = format!("Preset: {} ({}) | Mode: forced", preset_name, context_info);
+                }
+
+                self.messages.push((
+                    "system".to_string(),
+                    format!("✅ Model FORCED to {} - all agents will use this model", preset_name)
+                ));
+            }
+            Err(e) => {
+                self.messages.push((
+                    "system".to_string(),
+                    format!("❌ Failed to switch model: {}", e)
+                ));
+            }
+        }
+
+        self.scroll = u16::MAX; // Auto-scroll to bottom
+        Ok(())
+    }
+
+    fn handle_copy_command(&mut self) -> Result<()> {
+        self.input.clear();
+
+        // Build the full conversation text
+        let mut conversation_text = String::new();
+
+        for (role, content) in &self.messages {
+            let prefix = match role.as_str() {
+                "user" => "👤 You",
+                "assistant" => "🐴 Vork",
+                "tool" => "🔧 Tool",
+                "tool_result" => "📄 Result",
+                "error" => "❌ Error",
+                "system" => "ℹ️  System",
+                _ => role,
+            };
+
+            conversation_text.push_str(&format!("{}: {}\n\n", prefix, content));
+        }
+
+        // Copy to clipboard
+        match arboard::Clipboard::new() {
+            Ok(mut clipboard) => {
+                match clipboard.set_text(&conversation_text) {
+                    Ok(_) => {
+                        self.messages.push((
+                            "system".to_string(),
+                            format!("✅ Copied {} messages to clipboard", self.messages.len())
+                        ));
+                    }
+                    Err(e) => {
+                        self.messages.push((
+                            "system".to_string(),
+                            format!("❌ Failed to copy to clipboard: {}", e)
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                self.messages.push((
+                    "system".to_string(),
+                    format!("❌ Failed to access clipboard: {}", e)
+                ));
+            }
+        }
+
+        self.scroll = u16::MAX; // Auto-scroll to bottom
         Ok(())
     }
 
@@ -441,6 +841,12 @@ async fn run_app<B: ratatui::backend::Backend>(
 ) -> Result<()> {
     let mut gpu_update_counter = 0;
     loop {
+        // Clamp scroll before drawing
+        let max_scroll = app.messages.len().saturating_sub(1);
+        if app.scroll as usize > max_scroll {
+            app.scroll = max_scroll as u16;
+        }
+
         terminal.draw(|f| ui(f, app))?;
 
         // Update spinner animation when processing
@@ -477,24 +883,76 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
                         KeyCode::Enter => {
-                            if !app.processing {
-                                if app.input.trim() == "exit" || app.input.trim() == "quit" {
+                            if app.model_selector_active {
+                                // Confirm model selection
+                                app.confirm_model_selection().await?;
+                            } else if !app.processing {
+                                let input = app.input.trim();
+                                if input == "exit" || input == "quit" {
                                     return Ok(());
                                 }
-                                app.send_message().await?;
+                                if input == "/compact" {
+                                    app.handle_compact_command().await?;
+                                } else if input == "/model" {
+                                    app.handle_model_command().await?;
+                                } else if input == "/copy" {
+                                    app.handle_copy_command()?;
+                                } else {
+                                    app.send_message().await?;
+                                }
                             }
                         }
                         KeyCode::Up => {
-                            if !app.processing {
+                            if app.model_selector_active {
+                                // Navigate model selection
+                                if app.selected_preset_index > 0 {
+                                    app.selected_preset_index -= 1;
+                                }
+                            } else if !app.processing {
                                 // Navigate to previous command in history
                                 app.history_prev();
                             }
                         }
                         KeyCode::Down => {
-                            if !app.processing {
+                            if app.model_selector_active {
+                                // Navigate model selection
+                                if app.selected_preset_index < app.available_presets.len().saturating_sub(1) {
+                                    app.selected_preset_index += 1;
+                                }
+                            } else if !app.processing {
                                 // Navigate to next command in history
                                 app.history_next();
                             }
+                        }
+                        KeyCode::Tab => {
+                            if !app.processing && !app.model_selector_active {
+                                app.model_selector_active = true;
+                            }
+                        }
+                        KeyCode::Esc => {
+                            if app.model_selector_active {
+                                app.model_selector_active = false;
+                                app.messages.push((
+                                    "system".to_string(),
+                                    "❌ Model selection cancelled".to_string()
+                                ));
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            // Scroll up
+                            app.scroll = app.scroll.saturating_sub(5);
+                        }
+                        KeyCode::PageDown => {
+                            // Scroll down
+                            app.scroll = app.scroll.saturating_add(5);
+                        }
+                        KeyCode::Home => {
+                            // Scroll to top
+                            app.scroll = 0;
+                        }
+                        KeyCode::End => {
+                            // Scroll to bottom (will be clamped in render)
+                            app.scroll = u16::MAX;
                         }
                         _ => {}
                     }
@@ -502,6 +960,17 @@ async fn run_app<B: ratatui::backend::Backend>(
                 Event::Resize(_, _) => {
                     // Handle terminal resize by redrawing
                     terminal.autoresize()?;
+                }
+                Event::Mouse(mouse) => {
+                    match mouse.kind {
+                        event::MouseEventKind::ScrollUp => {
+                            app.scroll = app.scroll.saturating_sub(3);
+                        }
+                        event::MouseEventKind::ScrollDown => {
+                            app.scroll = app.scroll.saturating_add(3);
+                        }
+                        _ => {}
+                    }
                 }
                 _ => {}
             }
@@ -534,6 +1003,7 @@ fn ui(f: &mut Frame, app: &App) {
             Constraint::Min(5),          // Messages
             Constraint::Length(3),       // Input
             Constraint::Length(3),       // Status
+            Constraint::Length(3),       // Context usage
             Constraint::Length(gpu_height), // GPU stats (dynamic)
         ])
         .split(size);
@@ -545,10 +1015,12 @@ fn ui(f: &mut Frame, app: &App) {
                 .fg(app.agent_color)
                 .add_modifier(Modifier::BOLD),
         )
+        .alignment(ratatui::layout::Alignment::Center)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(header, chunks[0]);
 
-    // Messages
+    // Messages with text wrapping
+    let available_width = chunks[1].width.saturating_sub(4); // Account for borders and padding
     let messages: Vec<ListItem> = app
         .messages
         .iter()
@@ -565,7 +1037,7 @@ fn ui(f: &mut Frame, app: &App) {
 
             let prefix = match role.as_str() {
                 "user" => "👤 You",
-                "assistant" => "🤖 Assistant",
+                "assistant" => "🐴 Vork",
                 "tool" => "🔧 Tool",
                 "tool_result" => "📄 Result",
                 "error" => "❌ Error",
@@ -573,46 +1045,96 @@ fn ui(f: &mut Frame, app: &App) {
                 _ => role,
             };
 
-            let lines: Vec<Line> = content
-                .lines()
-                .map(|line| {
-                    Line::from(vec![
-                        Span::styled(
-                            format!("{}: ", prefix),
-                            style.add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(line, style),
-                    ])
-                })
-                .collect();
+            let prefix_text = format!("{}: ", prefix);
+            let prefix_len = prefix_text.chars().count();
+            let wrap_width = available_width.saturating_sub(prefix_len as u16).max(20) as usize;
+
+            let mut lines: Vec<Line> = Vec::new();
+
+            // Wrap each line of content
+            for (line_idx, line) in content.lines().enumerate() {
+                if line_idx == 0 {
+                    // First line includes the prefix
+                    for wrapped_line in textwrap::wrap(line, wrap_width) {
+                        if lines.is_empty() {
+                            // Very first line with prefix
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    prefix_text.clone(),
+                                    style.add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(wrapped_line.to_string(), style),
+                            ]));
+                        } else {
+                            // Continuation lines indented
+                            lines.push(Line::from(vec![
+                                Span::styled(
+                                    " ".repeat(prefix_len),
+                                    style,
+                                ),
+                                Span::styled(wrapped_line.to_string(), style),
+                            ]));
+                        }
+                    }
+                } else {
+                    // Subsequent lines (newlines in original content)
+                    for wrapped_line in textwrap::wrap(line, wrap_width) {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                " ".repeat(prefix_len),
+                                style,
+                            ),
+                            Span::styled(wrapped_line.to_string(), style),
+                        ]));
+                    }
+                }
+            }
+
+            // Handle empty content
+            if lines.is_empty() {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        prefix_text,
+                        style.add_modifier(Modifier::BOLD),
+                    ),
+                ]));
+            }
 
             ListItem::new(lines)
         })
         .collect();
 
+    // Scroll position already clamped in run_app
+
     let messages_widget = List::new(messages)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Conversation"),
+                .title("Conversation (Scroll: PgUp/PgDn/Mouse | Copy: Shift+Select)"),
         )
         .style(Style::default().fg(Color::White));
 
-    f.render_widget(messages_widget, chunks[1]);
+    // Create a stateful widget to enable scrolling
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(app.scroll as usize));
+
+    f.render_stateful_widget(messages_widget, chunks[1], &mut list_state);
 
     // Input with animated spinner and clear status
     let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let (input_text, input_style, input_title) = if app.processing {
+    let (input_text, input_style, input_title, border_color) = if app.processing {
         (
             format!("{} AI is thinking...", spinner_frames[app.spinner_state]),
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
             "⏳ Processing... (please wait)",
+            Color::Yellow,
         )
     } else {
         (
             format!("💬 {}", app.input),
             Style::default().fg(Color::White),
-            "✅ Ready for input (Ctrl+C to exit)",
+            "✅ Ready (/compact /model /copy | Ctrl+C to exit)",
+            Color::Green,
         )
     };
 
@@ -622,11 +1144,7 @@ fn ui(f: &mut Frame, app: &App) {
             Block::default()
                 .borders(Borders::ALL)
                 .title(input_title)
-                .border_style(if app.processing {
-                    Style::default().fg(Color::Yellow)
-                } else {
-                    Style::default().fg(Color::Green)
-                }),
+                .border_style(Style::default().fg(border_color)),
         );
     f.render_widget(input, chunks[2]);
 
@@ -663,6 +1181,42 @@ fn ui(f: &mut Frame, app: &App) {
                 })
         );
     f.render_widget(status, chunks[3]);
+
+    // Context usage panel
+    let (used, max, percentage) = app.session.conversation.get_context_usage();
+    let context_color = if percentage >= 75.0 {
+        Color::Red
+    } else if percentage >= 50.0 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+
+    let remaining = max.saturating_sub(used);
+    let context_text = format!(
+        "Used: {}tok │ Remaining: {}tok │ Total: {}tok │ Usage: {:.1}%",
+        used, remaining, max, percentage
+    );
+
+    // Check if compaction will happen
+    let needs_compaction = app.session.conversation.needs_compaction();
+    let compaction_notice = if needs_compaction {
+        " │ ⚠️  Compaction will occur after next message"
+    } else {
+        ""
+    };
+
+    let full_context_text = format!("{}{}", context_text, compaction_notice);
+
+    let context_widget = Paragraph::new(full_context_text)
+        .style(Style::default().fg(context_color))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("📊 Context Usage")
+                .border_style(Style::default().fg(context_color))
+        );
+    f.render_widget(context_widget, chunks[4]);
 
     // GPU stats (if available)
     if !app.gpu_stats.is_empty() {
@@ -725,6 +1279,70 @@ fn ui(f: &mut Frame, app: &App) {
                     .title("🎮 GPU Stats")
                     .border_style(Style::default().fg(Color::Cyan))
             );
-        f.render_widget(gpu_widget, chunks[4]);
+        f.render_widget(gpu_widget, chunks[5]);
     }
+
+    // Render model selector popup if active
+    if app.model_selector_active {
+        let popup_height = (app.available_presets.len() as u16).min(10) + 2; // Max 10 items visible + borders
+        let popup_width = 60;
+
+        let popup_area = centered_rect(popup_width, popup_height, size);
+
+        // Create list items for model selector
+        let model_items: Vec<ListItem> = app.available_presets.iter().enumerate()
+            .map(|(idx, preset)| {
+                let content = if idx == app.selected_preset_index {
+                    format!("→ {}", preset)
+                } else {
+                    format!("  {}", preset)
+                };
+                let style = if idx == app.selected_preset_index {
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::White)
+                };
+                ListItem::new(content).style(style)
+            })
+            .collect();
+
+        let model_list = List::new(model_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("🔧 Select Model (↑/↓: Navigate, Enter: Switch, Esc: Cancel)")
+                    .border_style(Style::default().fg(Color::Cyan))
+            )
+            .style(Style::default().bg(Color::Black));
+
+        let mut list_state = ratatui::widgets::ListState::default();
+        list_state.select(Some(app.selected_preset_index));
+
+        // Clear the area behind the popup
+        let clear_widget = Block::default().style(Style::default().bg(Color::Black));
+        f.render_widget(clear_widget, popup_area);
+
+        f.render_stateful_widget(model_list, popup_area, &mut list_state);
+    }
+}
+
+// Helper function to create a centered rectangle
+fn centered_rect(width: u16, height: u16, r: ratatui::layout::Rect) -> ratatui::layout::Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length((r.height.saturating_sub(height)) / 2),
+            Constraint::Length(height),
+            Constraint::Min(0),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Length((r.width.saturating_sub(width)) / 2),
+            Constraint::Length(width),
+            Constraint::Min(0),
+        ])
+        .split(popup_layout[1])[1]
 }

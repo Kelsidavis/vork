@@ -62,12 +62,20 @@ pub struct LlamaCppConfig {
     pub models_dir: String,
     pub binary_path: Option<String>,
     pub context_size: u32,
+    #[serde(default = "default_context_limit")]
+    pub context_limit: usize,
     pub ngl: u32,
     pub threads: u32,
     pub batch_size: u32,
     pub parallel: u32,
     pub cache_type_k: String,
     pub cache_type_v: String,
+    #[serde(default)]
+    pub cuda_visible_devices: Option<String>,
+}
+
+fn default_context_limit() -> usize {
+    32768
 }
 
 impl Default for Config {
@@ -83,12 +91,14 @@ impl Default for Config {
                 models_dir: "/media/k/vbox/models".to_string(),
                 binary_path: Some("/home/k/llama.cpp/build/bin/llama-server".to_string()),
                 context_size: 42768,
+                context_limit: 32768,
                 ngl: 48,
                 threads: 20,
                 batch_size: 170,
                 parallel: 8,
                 cache_type_k: "bf16".to_string(),
                 cache_type_v: "bf16".to_string(),
+                cuda_visible_devices: None,
             },
             assistant: AssistantConfig::default(),
         }

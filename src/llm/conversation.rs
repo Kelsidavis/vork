@@ -8,19 +8,39 @@ use super::client::Message;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conversation {
     pub messages: Vec<Message>,
+    #[serde(skip)]
+    pub estimated_tokens: usize,
+    #[serde(skip)]
+    pub max_context: usize,
 }
 
 impl Conversation {
     pub fn new() -> Self {
+        let system_message = Message {
+            role: "system".to_string(),
+            content: SYSTEM_PROMPT.to_string(),
+        };
+        let estimated_tokens = estimate_tokens(&system_message.content);
+
         Self {
-            messages: vec![Message {
-                role: "system".to_string(),
-                content: SYSTEM_PROMPT.to_string(),
-            }],
+            messages: vec![system_message],
+            estimated_tokens,
+            max_context: 32768, // Default, will be overridden
         }
     }
 
+    pub fn set_max_context(&mut self, max_context: usize) {
+        self.max_context = max_context;
+    }
+
+    pub fn get_context_usage(&self) -> (usize, usize, f32) {
+        // Returns (used, max, percentage)
+        let percentage = (self.estimated_tokens as f32 / self.max_context as f32) * 100.0;
+        (self.estimated_tokens, self.max_context, percentage)
+    }
+
     pub fn add_user_message(&mut self, content: String) {
+        self.estimated_tokens += estimate_tokens(&content);
         self.messages.push(Message {
             role: "user".to_string(),
             content,
@@ -28,6 +48,7 @@ impl Conversation {
     }
 
     pub fn add_assistant_message(&mut self, content: String) {
+        self.estimated_tokens += estimate_tokens(&content);
         self.messages.push(Message {
             role: "assistant".to_string(),
             content,
@@ -36,10 +57,91 @@ impl Conversation {
 
     pub fn add_tool_result(&mut self, tool_name: &str, result: &str) {
         // Add tool results as user messages since many models don't support "tool" role
+        let content = format!("Tool execution result:\nTool: {}\nResult:\n{}", tool_name, result);
+        self.estimated_tokens += estimate_tokens(&content);
         self.messages.push(Message {
             role: "user".to_string(),
-            content: format!("Tool execution result:\nTool: {}\nResult:\n{}", tool_name, result),
+            content,
         });
+    }
+
+    /// Check if compaction is needed (at 75% capacity)
+    pub fn needs_compaction(&self) -> bool {
+        self.estimated_tokens > (self.max_context * 3 / 4)
+    }
+
+    /// Compact the conversation by summarizing older messages
+    /// Returns true if compaction occurred, false otherwise
+    pub async fn compact_if_needed(&mut self, client: &super::client::LlamaClient) -> Result<bool> {
+        if !self.needs_compaction() {
+            return Ok(false);
+        }
+
+        // Keep system prompt (index 0) and last 10 messages
+        // Summarize everything in between
+        if self.messages.len() <= 11 {
+            // Not enough to compact
+            return Ok(false);
+        }
+
+        let system_msg = self.messages[0].clone();
+        let messages_to_compact: Vec<_> = self.messages.iter()
+            .skip(1)
+            .take(self.messages.len() - 11)
+            .cloned()
+            .collect();
+        let recent_messages: Vec<_> = self.messages.iter()
+            .skip(self.messages.len() - 10)
+            .cloned()
+            .collect();
+
+        // Create summarization prompt
+        let conversation_text = messages_to_compact.iter()
+            .map(|m| format!("{}: {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let summary_prompt = format!(
+            "Summarize the following conversation history concisely, preserving key facts, decisions, and context. Focus on:\n\
+            - Important technical details and decisions\n\
+            - File modifications and their purposes\n\
+            - Commands executed and their results\n\
+            - Any errors or issues encountered\n\n\
+            Conversation:\n{}\n\n\
+            Provide a concise summary in 2-3 paragraphs:",
+            conversation_text
+        );
+
+        // Get summary from LLM
+        let response = client.chat_completion(vec![
+            Message {
+                role: "user".to_string(),
+                content: summary_prompt,
+            }
+        ], None).await?;
+
+        let summary_response = response.choices[0].message.content.clone()
+            .unwrap_or_default();
+
+        // Rebuild conversation with summary
+        let summary_msg = Message {
+            role: "assistant".to_string(),
+            content: format!("[Conversation summary of {} messages]\n\n{}",
+                messages_to_compact.len(), summary_response),
+        };
+
+        // Recalculate tokens
+        self.estimated_tokens = estimate_tokens(&system_msg.content);
+        self.estimated_tokens += estimate_tokens(&summary_msg.content);
+        for msg in &recent_messages {
+            self.estimated_tokens += estimate_tokens(&msg.content);
+        }
+
+        // Rebuild messages
+        self.messages = vec![system_msg, summary_msg];
+        self.messages.extend(recent_messages);
+
+        Ok(true)
     }
 
     #[allow(dead_code)]
@@ -105,3 +207,11 @@ When the user asks you to modify code:
 
 You should be proactive in using tools to help solve problems. Don't just suggest changes - actually make them using the available tools.
 "#;
+
+/// Estimate token count (rough approximation: 1 token ≈ 4 characters)
+fn estimate_tokens(text: &str) -> usize {
+    // More accurate estimation considering:
+    // - ~4 chars per token on average
+    // - Extra tokens for formatting, role markers, etc.
+    (text.len() / 4) + 10
+}
