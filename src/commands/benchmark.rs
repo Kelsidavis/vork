@@ -42,19 +42,93 @@ pub async fn execute() -> Result<()> {
     }
     println!();
 
-    // Test prompts - MUST request specific length to fairly compare speed
+    // Test prompts - Complex real-world tasks with specified length for fair comparison
     let test_cases = vec![
         (
-            "Simple Code Generation",
-            "Write a Python function to calculate fibonacci numbers recursively. Include a docstring and 2-3 line explanation. About 100 words total.",
+            "Code Generation",
+            "Write a complete Rust function that implements a thread-safe LRU cache with generic key/value types. Include:\n\
+            - Proper struct definition with HashMap and linked list\n\
+            - Methods: new(), get(), put(), capacity()\n\
+            - Thread safety using Arc and Mutex\n\
+            - Comprehensive inline documentation\n\
+            Target: 300-400 words including code and explanations.",
         ),
         (
-            "Code Review",
-            "Review this code for bugs:\n```python\ndef divide(a, b):\n    return a / b\n```\nProvide a detailed review with at least 3 specific points. About 150 words.",
+            "Bug Analysis & Fix",
+            "Analyze and fix this Rust code:\n\
+            ```rust\n\
+            use std::collections::HashMap;\n\
+            fn process_data(data: Vec<String>) -> HashMap<String, usize> {\n\
+                let mut map = HashMap::new();\n\
+                for item in data {\n\
+                    let count = map.get(&item).unwrap();\n\
+                    map.insert(item, count + 1);\n\
+                }\n\
+                map\n\
+            }\n\
+            ```\n\
+            Provide:\n\
+            - Detailed explanation of all bugs (race conditions, panics, logic errors)\n\
+            - Complete corrected version with proper error handling\n\
+            - Best practices commentary\n\
+            Target: 350-450 words.",
         ),
         (
-            "Complex Reasoning",
-            "Explain the difference between async/await and threads in Rust. Give 2 concrete examples with code snippets. Write approximately 200 words with detailed technical explanation.",
+            "System Design & Implementation",
+            "Design and implement a CLI tool in Rust that monitors system resources (CPU, memory, disk) and logs to a file when thresholds are exceeded. Include:\n\
+            - Architecture overview with component breakdown\n\
+            - Key data structures (Config, ResourceSnapshot, Alert)\n\
+            - Core function signatures with detailed logic\n\
+            - Error handling strategy\n\
+            - Performance considerations\n\
+            Target: 400-500 words with code snippets and technical reasoning.",
+        ),
+        (
+            "Algorithm Optimization",
+            "Given this naive string matching implementation:\n\
+            ```rust\n\
+            fn find_pattern(text: &str, pattern: &str) -> Vec<usize> {\n\
+                let mut positions = Vec::new();\n\
+                for i in 0..text.len() {\n\
+                    if text[i..].starts_with(pattern) {\n\
+                        positions.push(i);\n\
+                    }\n\
+                }\n\
+                positions\n\
+            }\n\
+            ```\n\
+            Provide:\n\
+            - Time complexity analysis of current implementation\n\
+            - Optimized version using Boyer-Moore or KMP algorithm\n\
+            - Performance comparison with Big-O notation\n\
+            - Benchmarking strategy\n\
+            Target: 350-450 words with detailed explanations.",
+        ),
+        (
+            "Refactoring & Architecture",
+            "Refactor this monolithic function into clean, testable components:\n\
+            ```rust\n\
+            fn handle_request(req: String) -> String {\n\
+                let parts: Vec<&str> = req.split('|').collect();\n\
+                let cmd = parts[0];\n\
+                if cmd == \"get\" {\n\
+                    let id = parts[1].parse::<u32>().unwrap();\n\
+                    format!(\"Result: {}\", id * 2)\n\
+                } else if cmd == \"set\" {\n\
+                    let id = parts[1].parse::<u32>().unwrap();\n\
+                    let val = parts[2];\n\
+                    format!(\"Stored: {} = {}\", id, val)\n\
+                } else {\n\
+                    \"Error\".to_string()\n\
+                }\n\
+            }\n\
+            ```\n\
+            Provide:\n\
+            - Command pattern implementation with enums\n\
+            - Proper error handling with Result types\n\
+            - Unit test examples\n\
+            - SOLID principles explanation\n\
+            Target: 400-500 words.",
         ),
     ];
 
