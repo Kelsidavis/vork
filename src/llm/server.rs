@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -184,6 +184,7 @@ impl ServerManager {
     }
 
     /// Check if server is running
+    #[allow(dead_code)]
     pub async fn is_server_running(&self, url: &str) -> bool {
         let client = reqwest::Client::new();
         client

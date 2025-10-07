@@ -42,12 +42,14 @@ impl Conversation {
         });
     }
 
+    #[allow(dead_code)]
     pub fn save(&self, path: &PathBuf) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
         fs::write(path, json)?;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn load(path: &PathBuf) -> Result<Self> {
         let json = fs::read_to_string(path)?;
         let conversation = serde_json::from_str(&json)?;

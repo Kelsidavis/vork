@@ -5,12 +5,14 @@ use std::fs;
 use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct Tool {
     pub r#type: String,
     pub function: FunctionDefinition,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct FunctionDefinition {
     pub name: String,
     pub description: String,
@@ -18,12 +20,14 @@ pub struct FunctionDefinition {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ToolCall {
     pub name: String,
     pub arguments: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ToolResult {
     pub tool_call_id: String,
     pub output: String,

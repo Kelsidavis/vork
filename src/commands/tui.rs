@@ -6,10 +6,10 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    text::{Line, Span},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
 use std::env;
@@ -45,6 +45,7 @@ fn parse_color(color_name: &str) -> Color {
 struct App {
     input: String,
     messages: Vec<(String, String)>, // (role, content)
+    #[allow(dead_code)]
     scroll: u16,
     session: Session,
     client: LlamaClient,
@@ -54,6 +55,7 @@ struct App {
     processing: bool,
     spinner_state: usize,
     tokens_per_second: f64,
+    #[allow(dead_code)]
     last_token_time: std::time::Instant,
     agent_color: Color,
     header_title: String,

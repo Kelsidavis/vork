@@ -29,6 +29,7 @@ pub struct Choice {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ResponseMessage {
     pub role: String,
     pub content: Option<String>,
@@ -36,6 +37,7 @@ pub struct ResponseMessage {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct ToolCallResponse {
     pub id: String,
     pub r#type: String,

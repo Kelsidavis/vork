@@ -14,6 +14,7 @@ pub trait Backend {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ModelInfo {
     pub name: String,
     pub size: Option<String>,
