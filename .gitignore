@@ -1,0 +1,30 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+/dist/
+/build/
+
+# User configurations (contains local paths)
+# Keep the template, ignore actual config
+.vork/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*~
+*.bak

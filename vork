@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Vork - Launch LLM in new terminal
+
+set -euo pipefail
+
+# Default model
+DEFAULT_MODEL="qwen3-coder-30b-a3b-instruct-q5-k-m"
+DEFAULT_PORT="8080"
+
+# Use default if no arguments provided
+MODEL="${1:-$DEFAULT_MODEL}"
+PORT="${2:-$DEFAULT_PORT}"
+
+# Detect terminal emulator
+if command -v gnome-terminal &> /dev/null; then
+    gnome-terminal -- bash -c "cd $(pwd) && cargo run -- run '$MODEL' --port '$PORT'; read -p 'Press Enter to close...'"
+elif command -v konsole &> /dev/null; then
+    konsole -e bash -c "cd $(pwd) && cargo run -- run '$MODEL' --port '$PORT'; read -p 'Press Enter to close...'"
+elif command -v xterm &> /dev/null; then
+    xterm -e bash -c "cd $(pwd) && cargo run -- run '$MODEL' --port '$PORT'; read -p 'Press Enter to close...'"
+elif command -v alacritty &> /dev/null; then
+    alacritty -e bash -c "cd $(pwd) && cargo run -- run '$MODEL' --port '$PORT'; read -p 'Press Enter to close...'"
+elif command -v kitty &> /dev/null; then
+    kitty bash -c "cd $(pwd) && cargo run -- run '$MODEL' --port '$PORT'; read -p 'Press Enter to close...'"
+else
+    echo "Error: No supported terminal emulator found"
+    echo "Supported: gnome-terminal, konsole, xterm, alacritty, kitty"
+    exit 1
+fi
+
+echo "🚀 Launched $MODEL in new terminal on port $PORT"
