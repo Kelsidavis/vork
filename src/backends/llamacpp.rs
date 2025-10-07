@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use crate::config::Config;
 
 pub struct LlamaCppBackend {
@@ -132,6 +132,11 @@ impl LlamaCppBackend {
         if let Some(ref gpu_index) = cfg.cuda_visible_devices {
             cmd.arg("--main-gpu").arg(gpu_index);
         }
+
+        // Redirect stdout/stderr to prevent UI corruption during TUI mode
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null());
 
         // Spawn in background
         cmd.spawn()
