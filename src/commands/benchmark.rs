@@ -1,5 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
@@ -152,11 +153,15 @@ pub async fn execute() -> Result<()> {
                     let estimated_tokens = content.len() / 4;
                     let tokens_per_sec = estimated_tokens as f64 / duration.as_secs_f64();
 
-                    println!("      {} {:.1} tok/s (~{} tokens in {:.1}s)",
+                    // Also calculate response latency (time to complete)
+                    let latency_ms = duration.as_millis();
+
+                    println!("      {} {:.1} tok/s (~{} tokens, {:.1}s, {}ms latency)",
                         "✓".green(),
                         tokens_per_sec,
                         estimated_tokens,
-                        duration.as_secs_f64()
+                        duration.as_secs_f64(),
+                        latency_ms
                     );
 
                     preset_results.test_results.push(TestResult {
@@ -189,6 +194,9 @@ pub async fn execute() -> Result<()> {
 
     // Print summary report
     print_summary(&results);
+
+    // Save benchmark results for agent allocation
+    save_benchmark_results(&results)?;
 
     Ok(())
 }
@@ -306,4 +314,125 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     } else {
         format!("{}...", &s[..max_len])
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct BenchmarkResults {
+    timestamp: String,
+    fastest_preset: String,
+    largest_context_preset: String,
+    best_reasoning_preset: String,
+    presets: Vec<PresetStats>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PresetStats {
+    name: String,
+    avg_tokens_per_second: f64,
+    context_size: u32,
+}
+
+fn save_benchmark_results(results: &[PresetBenchmark]) -> Result<()> {
+    use chrono::Local;
+
+    // Find fastest preset
+    let fastest = results.iter()
+        .max_by(|a, b| {
+            let avg_a = a.test_results.iter().map(|r| r.tokens_per_second).sum::<f64>() / a.test_results.len() as f64;
+            let avg_b = b.test_results.iter().map(|r| r.tokens_per_second).sum::<f64>() / b.test_results.len() as f64;
+            avg_a.partial_cmp(&avg_b).unwrap()
+        })
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "qwen3-14b-instant".to_string());
+
+    // Find largest context
+    let largest_context = results.iter()
+        .max_by_key(|r| r.context_size)
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "qwen3-14b-large-context".to_string());
+
+    // Find best for reasoning (30B model or fallback to fastest)
+    let best_reasoning = results.iter()
+        .find(|r| r.name.contains("30"))
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| fastest.clone());
+
+    let preset_stats: Vec<PresetStats> = results.iter()
+        .map(|p| {
+            let avg_speed = p.test_results.iter().map(|r| r.tokens_per_second).sum::<f64>()
+                / p.test_results.len() as f64;
+            PresetStats {
+                name: p.name.clone(),
+                avg_tokens_per_second: avg_speed,
+                context_size: p.context_size,
+            }
+        })
+        .collect();
+
+    let benchmark_results = BenchmarkResults {
+        timestamp: Local::now().to_rfc3339(),
+        fastest_preset: fastest,
+        largest_context_preset: largest_context,
+        best_reasoning_preset: best_reasoning,
+        presets: preset_stats,
+    };
+
+    // Save to config directory
+    let config_dir = Config::config_dir()?;
+    let benchmark_path = config_dir.join("benchmark_results.json");
+    let json = serde_json::to_string_pretty(&benchmark_results)?;
+    std::fs::write(&benchmark_path, json)?;
+
+    println!();
+    println!("{}", "💾 Benchmark results saved!".green().bold());
+    println!("   Path: {}", benchmark_path.display().to_string().yellow());
+    println!();
+    println!("{}", "🤖 Updating agent preset assignments...".cyan().bold());
+
+    // Update default agents with benchmark results
+    update_agent_presets(&benchmark_results)?;
+
+    Ok(())
+}
+
+fn update_agent_presets(results: &BenchmarkResults) -> Result<()> {
+    use crate::agents::Agent;
+
+    // Define agent-to-preset mapping based on benchmark results
+    let agent_mappings = vec![
+        // Fast, simple tasks - use fastest model
+        ("default", results.fastest_preset.as_str()),
+        ("code-editor", results.fastest_preset.as_str()),
+        ("debugger", results.fastest_preset.as_str()),
+        ("documenter", results.fastest_preset.as_str()),
+
+        // Large context needs - use largest context even if slower
+        ("reviewer", results.largest_context_preset.as_str()),
+        ("code-auditor", results.largest_context_preset.as_str()),
+
+        // Complex reasoning - use best reasoning (usually 30B)
+        ("researcher", results.best_reasoning_preset.as_str()),
+        ("reverse-engineer", results.best_reasoning_preset.as_str()),
+        ("rust-expert", results.best_reasoning_preset.as_str()),
+        ("security-auditor", results.best_reasoning_preset.as_str()),
+        ("performance-optimizer", results.best_reasoning_preset.as_str()),
+        ("test-writer", results.best_reasoning_preset.as_str()),
+    ];
+
+    let mut updated_count = 0;
+    for (agent_name, preset_name) in agent_mappings {
+        if let Ok(mut agent) = Agent::load(agent_name) {
+            agent.preferred_preset = Some(preset_name.to_string());
+            if agent.save().is_ok() {
+                println!("   ✓ {} → {}", agent_name.green(), preset_name.yellow());
+                updated_count += 1;
+            }
+        }
+    }
+
+    println!();
+    println!("{} {} agents updated with optimal presets",
+        "✓".green(), updated_count);
+
+    Ok(())
 }

@@ -119,6 +119,8 @@ enum Commands {
     },
     /// Benchmark model presets for speed and quality
     Benchmark,
+    /// Show preset performance and agent assignments
+    Presets,
 }
 
 #[tokio::main]
@@ -187,6 +189,9 @@ async fn main() -> Result<()> {
         }
         Commands::Benchmark => {
             commands::benchmark::execute().await?;
+        }
+        Commands::Presets => {
+            commands::presets::execute()?;
         }
     }
 
