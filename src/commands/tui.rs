@@ -280,6 +280,18 @@ pub async fn execute(server_url: Option<String>, model: Option<String>, agent_na
 
     let model = model.unwrap_or_else(|| config.assistant.model.clone());
 
+    // Warm up model with a tiny prompt (async, non-blocking)
+    let warmup_client = LlamaClient::new(server_url.clone(), model.clone());
+    tokio::spawn(async move {
+        let _ = warmup_client.chat_completion(
+            vec![crate::llm::client::Message {
+                role: "user".to_string(),
+                content: "Hi".to_string(),
+            }],
+            None,
+        ).await;
+    });
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
