@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A feature-complete alternative to OpenAI Codex with 14 specialized AI agents, beautiful TUI, and complete local control.
+  A feature-complete alternative to OpenAI Codex with 15 specialized AI agents, beautiful TUI, and complete local control.
 </p>
 
 ---
@@ -17,9 +17,9 @@
 ## ✨ Features
 
 - 🎨 **Beautiful TUI Interface** - Ratatui-based terminal UI with custom colors per agent
-- 🤖 **14 Specialized AI Agents** - Expert agents for different coding tasks
+- 🤖 **15 Specialized AI Agents** - Expert agents for different coding tasks
 - 🎯 **Smart Agent Selection** - Automatically picks the right agent based on your task
-- 🔧 **Tool Integration** - File operations, bash commands, code search
+- 🔧 **Tool Integration** - File operations, bash commands, code search, web research
 - 🚀 **Auto-Start Server** - Automatically manages llama-server lifecycle
 - 💾 **Session Management** - Save and resume conversations
 - ⚡ **Performance Metrics** - Real-time tokens/second display
@@ -44,6 +44,7 @@
 | 🔍 **reviewer** | Code review and suggestions | magenta | review, feedback, improve, refactor |
 | 📝 **documenter** | Documentation specialist | blue | document, readme, explain, comment, doc |
 | 🐛 **debugger** | Debug and fix issues | yellow | debug, fix bug, error, crash, broken |
+| 🔬 **researcher** | Online research with workspace context linking | lightgreen | research, look up, web search, documentation, what is |
 
 ## 📦 Installation
 

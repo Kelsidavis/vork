@@ -8,8 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- Initial release of Vork
-- 14 specialized AI agents with auto-selection
+- 🔬 Online research agent with web search capability (DuckDuckGo)
+- 🌐 Web search tool for all agents to find documentation and solutions
+- 📊 Detailed file operation status messages (reading, writing, executing)
+- 🗂️ Workspace-relative path interpretation (e.g., /docs/ means ./docs/)
+- 15 specialized AI agents with auto-selection (added researcher)
 - Beautiful TUI interface powered by ratatui
 - llama.cpp integration with auto-start server
 - Session management and resume capability
@@ -22,8 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Interactive setup wizard
 - Comprehensive documentation
 
+### Changed
+- All agent prompts now understand workspace-relative paths by default
+- Tool execution shows real-time status with emojis and completion messages
+
 ### Agents Included
 - 🚀 default - General-purpose coding assistant
+- 🔬 researcher - Online research with workspace context linking
 - 🦀 rust-expert - Rust programming specialist
 - 🔍 code-auditor - Code quality and compliance auditor
 - 🔬 reverse-engineer - Binary analysis with radare2/Ghidra
