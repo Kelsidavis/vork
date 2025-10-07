@@ -483,7 +483,15 @@ Vork supports analyzing images with vision-capable models! Perfect for:
 - 📝 Reading text from images
 - 🔍 Describing visual content
 
-**Quick Setup:**
+**Automated Setup (CPU-Optimized):**
+```bash
+# One-command setup for vision on CPU
+./scripts/setup-vision-2b.sh
+```
+
+This downloads LLaVA 1.6 (7B Q4_K_S) and configures Vork for CPU-only vision support.
+
+**Manual Setup:**
 ```bash
 # 1. Download a vision model (LLaVA 1.6 recommended)
 wget https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf
@@ -496,7 +504,9 @@ extra_args = "--mmproj /path/to/mmproj-model-f16.gguf"
 vork "analyze screenshot.png and describe the UI"
 ```
 
-**📖 Full Guide:** See [docs/VISION_SETUP.md](docs/VISION_SETUP.md) for complete setup instructions, model recommendations, and usage examples.
+**📖 Guides:**
+- [scripts/README.md](scripts/README.md) - Automated setup scripts
+- [docs/VISION_SETUP.md](docs/VISION_SETUP.md) - Complete manual setup, GPU optimization, model comparisons
 
 ## 🆚 Comparison: Vork vs OpenAI Codex
 
