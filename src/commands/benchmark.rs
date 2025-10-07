@@ -42,19 +42,19 @@ pub async fn execute() -> Result<()> {
     }
     println!();
 
-    // Test prompts covering different use cases
+    // Test prompts - MUST request specific length to fairly compare speed
     let test_cases = vec![
         (
             "Simple Code Generation",
-            "Write a Python function to calculate fibonacci numbers recursively. Just code, no explanation.",
+            "Write a Python function to calculate fibonacci numbers recursively. Include a docstring and 2-3 line explanation. About 100 words total.",
         ),
         (
             "Code Review",
-            "Review this code for bugs:\n```python\ndef divide(a, b):\n    return a / b\n```",
+            "Review this code for bugs:\n```python\ndef divide(a, b):\n    return a / b\n```\nProvide a detailed review with at least 3 specific points. About 150 words.",
         ),
         (
             "Complex Reasoning",
-            "Explain the difference between async/await and threads in Rust. Give a concrete example of when to use each.",
+            "Explain the difference between async/await and threads in Rust. Give 2 concrete examples with code snippets. Write approximately 200 words with detailed technical explanation.",
         ),
     ];
 
@@ -151,17 +151,25 @@ pub async fn execute() -> Result<()> {
 
                     // Estimate tokens (rough approximation: ~4 chars per token)
                     let estimated_tokens = content.len() / 4;
-                    let tokens_per_sec = estimated_tokens as f64 / duration.as_secs_f64();
+                    let tokens_per_sec = if estimated_tokens > 0 {
+                        estimated_tokens as f64 / duration.as_secs_f64()
+                    } else {
+                        0.0
+                    };
 
-                    // Also calculate response latency (time to complete)
-                    let latency_ms = duration.as_millis();
+                    // Latency score: ms per token (lower is better)
+                    let latency_score = if estimated_tokens > 0 {
+                        duration.as_millis() as f64 / estimated_tokens as f64
+                    } else {
+                        999999.0
+                    };
 
-                    println!("      {} {:.1} tok/s (~{} tokens, {:.1}s, {}ms latency)",
+                    println!("      {} {:.1} tok/s (~{} tokens, {:.1}s, {:.1}ms/tok)",
                         "✓".green(),
                         tokens_per_sec,
                         estimated_tokens,
                         duration.as_secs_f64(),
-                        latency_ms
+                        latency_score
                     );
 
                     preset_results.test_results.push(TestResult {
@@ -170,6 +178,7 @@ pub async fn execute() -> Result<()> {
                         total_tokens: estimated_tokens,
                         duration,
                         response_preview: truncate_string(content, 100),
+                        latency_score,
                     });
                 }
                 Err(e) => {
@@ -180,6 +189,7 @@ pub async fn execute() -> Result<()> {
                         total_tokens: 0,
                         duration: Duration::from_secs(0),
                         response_preview: format!("Error: {}", e),
+                        latency_score: 999999.0,
                     });
                 }
             }
@@ -214,6 +224,7 @@ struct TestResult {
     total_tokens: usize,
     duration: Duration,
     response_preview: String,
+    latency_score: f64,  // Lower is better: duration_ms / tokens
 }
 
 fn print_summary(results: &[PresetBenchmark]) {
@@ -222,32 +233,41 @@ fn print_summary(results: &[PresetBenchmark]) {
     println!();
 
     // Table header
-    println!("{:<25} {:<12} {:<15} {:<15}",
+    println!("{:<25} {:<12} {:<15} {:<18} {:<15}",
         "Preset".cyan().bold(),
         "Context".cyan().bold(),
         "Avg Speed".cyan().bold(),
+        "Latency".cyan().bold(),
         "Use Case".cyan().bold()
     );
-    println!("{}", "─".repeat(80).cyan());
+    println!("{}", "─".repeat(95).cyan());
 
     for preset in results {
         let avg_speed: f64 = preset.test_results.iter()
             .map(|r| r.tokens_per_second)
             .sum::<f64>() / preset.test_results.len() as f64;
 
+        let avg_latency: f64 = preset.test_results.iter()
+            .filter(|r| r.latency_score < 999999.0)
+            .map(|r| r.latency_score)
+            .sum::<f64>() / preset.test_results.iter()
+            .filter(|r| r.latency_score < 999999.0)
+            .count() as f64;
+
         let use_case = match preset.name.as_str() {
-            n if n.contains("instant") => "Fast responses, simple tasks",
-            n if n.contains("large-context") => "Large files, code review",
-            n if n.contains("30b") || n.contains("max") => "Complex reasoning, research",
+            n if n.contains("instant") => "Fast responses",
+            n if n.contains("large-context") => "Large files",
+            n if n.contains("30b") || n.contains("max") => "Complex reasoning",
             _ => "General purpose",
         };
 
         let ctx_display = format!("{}k", preset.context_size / 1024);
 
-        println!("{:<25} {:<12} {:<15} {:<15}",
+        println!("{:<25} {:<12} {:<15} {:<18} {:<15}",
             preset.name.green(),
             ctx_display.yellow(),
             format!("{:.1} tok/s", avg_speed).cyan(),
+            format!("{:.1} ms/tok", avg_latency).magenta(),
             use_case
         );
     }
@@ -265,7 +285,8 @@ fn print_summary(results: &[PresetBenchmark]) {
         for test in &preset.test_results {
             if test.tokens_per_second > 0.0 {
                 println!("   {} {}", "•".cyan(), test.test_name.bold());
-                println!("     Speed: {:.1} tok/s", test.tokens_per_second);
+                println!("     Speed: {:.1} tok/s ({:.1} ms/tok)",
+                    test.tokens_per_second, test.latency_score);
                 println!("     Time: {:.2}s for {} tokens",
                     test.duration.as_secs_f64(), test.total_tokens);
                 println!("     Preview: {}",
@@ -335,12 +356,18 @@ struct PresetStats {
 fn save_benchmark_results(results: &[PresetBenchmark]) -> Result<()> {
     use chrono::Local;
 
-    // Find fastest preset
+    // Find fastest preset (lowest latency = fastest per-token generation)
     let fastest = results.iter()
-        .max_by(|a, b| {
-            let avg_a = a.test_results.iter().map(|r| r.tokens_per_second).sum::<f64>() / a.test_results.len() as f64;
-            let avg_b = b.test_results.iter().map(|r| r.tokens_per_second).sum::<f64>() / b.test_results.len() as f64;
-            avg_a.partial_cmp(&avg_b).unwrap()
+        .min_by(|a, b| {
+            let avg_lat_a = a.test_results.iter()
+                .filter(|r| r.latency_score < 999999.0)
+                .map(|r| r.latency_score)
+                .sum::<f64>() / a.test_results.iter().filter(|r| r.latency_score < 999999.0).count() as f64;
+            let avg_lat_b = b.test_results.iter()
+                .filter(|r| r.latency_score < 999999.0)
+                .map(|r| r.latency_score)
+                .sum::<f64>() / b.test_results.iter().filter(|r| r.latency_score < 999999.0).count() as f64;
+            avg_lat_a.partial_cmp(&avg_lat_b).unwrap()
         })
         .map(|p| p.name.clone())
         .unwrap_or_else(|| "qwen3-14b-instant".to_string());
