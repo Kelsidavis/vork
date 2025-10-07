@@ -137,6 +137,8 @@ pub async fn execute_tool(
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
 
+            eprintln!("📖 Reading file: {}", path);
+
             let content = fs::read_to_string(path)
                 .with_context(|| format!("Failed to read file: {}", path))?;
 
@@ -149,6 +151,8 @@ pub async fn execute_tool(
             let content = arguments["content"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'content' parameter"))?;
+
+            eprintln!("✏️  Writing file: {}", path);
 
             // Check approval
             if let Some(approval) = approval_system {
@@ -166,12 +170,15 @@ pub async fn execute_tool(
             fs::write(path, content)
                 .with_context(|| format!("Failed to write file: {}", path))?;
 
-            Ok(format!("Successfully wrote to {}", path))
+            eprintln!("✅ Wrote {} bytes to {}", content.len(), path);
+            Ok(format!("Successfully wrote {} bytes to {}", content.len(), path))
         }
         "list_files" => {
             let path = arguments["path"]
                 .as_str()
                 .unwrap_or(".");
+
+            eprintln!("📁 Listing directory: {}", path);
 
             let entries = fs::read_dir(path)
                 .with_context(|| format!("Failed to read directory: {}", path))?;
@@ -184,12 +191,15 @@ pub async fn execute_tool(
                 files.push(format!("{}{}", name, file_type));
             }
 
+            eprintln!("✅ Found {} items in {}", files.len(), path);
             Ok(files.join("\n"))
         }
         "bash_exec" => {
             let command = arguments["command"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'command' parameter"))?;
+
+            eprintln!("⚡ Executing bash command: {}", command);
 
             // Check approval
             if let Some(approval) = approval_system {
@@ -207,9 +217,16 @@ pub async fn execute_tool(
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
 
+            let exit_code = output.status.code().unwrap_or(-1);
+            if exit_code == 0 {
+                eprintln!("✅ Command completed successfully");
+            } else {
+                eprintln!("⚠️  Command exited with code {}", exit_code);
+            }
+
             Ok(format!(
                 "Exit code: {}\n\nStdout:\n{}\n\nStderr:\n{}",
-                output.status.code().unwrap_or(-1),
+                exit_code,
                 stdout,
                 stderr
             ))
@@ -222,6 +239,8 @@ pub async fn execute_tool(
                 .as_str()
                 .unwrap_or(".");
 
+            eprintln!("🔍 Searching for '{}' in {}", pattern, path);
+
             let output = Command::new("grep")
                 .arg("-r")
                 .arg("-n")
@@ -231,6 +250,14 @@ pub async fn execute_tool(
                 .with_context(|| format!("Failed to search for pattern: {}", pattern))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
+            let line_count = stdout.lines().count();
+
+            if line_count > 0 {
+                eprintln!("✅ Found {} matches", line_count);
+            } else {
+                eprintln!("ℹ️  No matches found");
+            }
+
             Ok(stdout.to_string())
         }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
