@@ -458,18 +458,20 @@ fn ui(f: &mut Frame, app: &App) {
 
     f.render_widget(messages_widget, chunks[1]);
 
-    // Input with animated spinner
+    // Input with animated spinner and clear status
     let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-    let input_text = if app.processing {
-        format!("{} Thinking...", spinner_frames[app.spinner_state])
+    let (input_text, input_style, input_title) = if app.processing {
+        (
+            format!("{} AI is thinking...", spinner_frames[app.spinner_state]),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            "⏳ Processing... (please wait)",
+        )
     } else {
-        format!("💬 {}", app.input)
-    };
-
-    let input_style = if app.processing {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::White)
+        (
+            format!("💬 {}", app.input),
+            Style::default().fg(Color::White),
+            "✅ Ready for input (Ctrl+C to exit)",
+        )
     };
 
     let input = Paragraph::new(input_text)
@@ -477,19 +479,46 @@ fn ui(f: &mut Frame, app: &App) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Input (Ctrl+C to exit, type 'exit' to quit)"),
+                .title(input_title)
+                .border_style(if app.processing {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Green)
+                }),
         );
     f.render_widget(input, chunks[2]);
 
-    // Status bar with tokens/s in bottom right
-    let status_text = if app.tokens_per_second > 0.0 {
-        format!("{} │ {:.1} tok/s", app.status, app.tokens_per_second)
+    // Status bar with processing indicator and tokens/s
+    let status_text = if app.processing {
+        let spinner = spinner_frames[app.spinner_state];
+        if app.tokens_per_second > 0.0 {
+            format!("{} {} │ {:.1} tok/s │ ⏳ Processing...", spinner, app.status, app.tokens_per_second)
+        } else {
+            format!("{} {} │ ⏳ Processing...", spinner, app.status)
+        }
+    } else if app.tokens_per_second > 0.0 {
+        format!("{} │ {:.1} tok/s │ ✅ Idle", app.status, app.tokens_per_second)
     } else {
-        app.status.clone()
+        format!("{} │ ✅ Ready", app.status)
+    };
+
+    let status_style = if app.processing {
+        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(app.agent_color)
     };
 
     let status = Paragraph::new(status_text)
-        .style(Style::default().fg(app.agent_color))
-        .block(Block::default().borders(Borders::ALL).title("Status"));
+        .style(status_style)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Status")
+                .border_style(if app.processing {
+                    Style::default().fg(Color::Yellow)
+                } else {
+                    Style::default().fg(Color::Green)
+                })
+        );
     f.render_widget(status, chunks[3]);
 }
