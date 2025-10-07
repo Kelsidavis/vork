@@ -1,7 +1,7 @@
 # Qwen3 Coder 30B - Maximum GPU Utilization
-# All 49/49 layers on GPU with optimized context size
-# Model: 20GB, KV cache: ~8GB, Total: ~28GB (fits dual GPU)
-# Provides excellent balance of speed and large context
+# MoE architecture: 128 experts, 8 active per token
+# Model: 20GB, KV cache: ~6.7GB, Total: ~26.7GB (96% dual GPU)
+# Provides exceptional speed (9.6 ms/tok) + large context (42k)
 
 default_backend = "llamacpp"
 
@@ -16,8 +16,8 @@ require_git_repo = false
 enabled = true
 models_dir = "/media/k/vbox/models/Qwen3"
 binary_path = "/home/k/llama.cpp/build/bin/llama-server"
-context_size = 32768  # 32k context - optimal for dual GPU setup
-context_limit = 28672  # Compact when conversation exceeds this
+context_size = 43008  # 42k context - maximum for dual GPU setup
+context_limit = 40960  # Compact when conversation exceeds this
 ngl = 49  # All layers on GPU
 threads = 20
 batch_size = 512
@@ -29,7 +29,7 @@ cache_type_v = "bf16"
 # /home/k/llama.cpp/build/bin/llama-server \
 #   -m /media/k/vbox/models/Qwen3/Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf \
 #   --host 0.0.0.0 --port 8080 \
-#   -c 32768 -ngl 49 -t 20 -b 512 --parallel 4 \
+#   -c 43008 -ngl 49 -t 20 -b 512 --parallel 4 \
 #   --cache-type-k bf16 --cache-type-v bf16 --jinja
 
 [ollama]
