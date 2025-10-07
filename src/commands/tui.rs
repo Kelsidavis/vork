@@ -173,6 +173,12 @@ impl App {
         self.input.clear();
         self.processing = true;
 
+        // Add immediate "thinking" feedback
+        self.messages.push((
+            "system".to_string(),
+            "💭 Thinking...".to_string(),
+        ));
+
         let start_time = std::time::Instant::now();
         let mut total_tokens = 0usize;
 
@@ -196,6 +202,13 @@ impl App {
 
             // Check if there are tool calls
             if let Some(tool_calls) = &choice.message.tool_calls {
+                // Remove the "Thinking..." message before showing tool execution
+                if let Some(last_msg) = self.messages.last() {
+                    if last_msg.0 == "system" && last_msg.1 == "💭 Thinking..." {
+                        self.messages.pop();
+                    }
+                }
+
                 for tool_call in tool_calls {
                     let tool_name = &tool_call.function.name;
                     let arguments: serde_json::Value =
@@ -234,6 +247,13 @@ impl App {
 
             // If no tool calls, process the assistant's message
             if let Some(content) = &choice.message.content {
+                // Remove the "Thinking..." message
+                if let Some(last_msg) = self.messages.last() {
+                    if last_msg.0 == "system" && last_msg.1 == "💭 Thinking..." {
+                        self.messages.pop();
+                    }
+                }
+
                 // Filter out slot access messages
                 let filtered_content: String = content
                     .lines()
