@@ -112,11 +112,12 @@ vork exec --full-auto "refactor this function"
 The terminal UI includes:
 - 🎨 **Color-coded messages** - User (blue), Assistant (agent-specific), Tools (yellow)
 - 📊 **Live status bar** - Session ID, message count, token usage, tokens/second
+- 🎮 **Live GPU stats** - Real-time VRAM usage, GPU utilization, temperature (via nvidia-smi)
 - 🔧 **Real-time tool execution** - Watch as the agent reads files and runs commands
 - 💾 **Auto-save** - Every conversation is automatically saved
 - ⌨️ **Keyboard controls**:
   - `Enter` - Send message
-  - `Up/Down` - Scroll messages
+  - `Up/Down` - Navigate message history
   - `Ctrl+C` - Exit
   - Type `exit` or `quit` - Graceful exit
 

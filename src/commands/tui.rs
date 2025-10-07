@@ -42,6 +42,52 @@ fn parse_color(color_name: &str) -> Color {
     }
 }
 
+fn fetch_gpu_stats() -> Vec<GpuStats> {
+    use std::process::Command;
+
+    let output = Command::new("nvidia-smi")
+        .args(&[
+            "--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu",
+            "--format=csv,noheader,nounits"
+        ])
+        .output();
+
+    let Ok(output) = output else {
+        return vec![];
+    };
+
+    if !output.status.success() {
+        return vec![];
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+            if parts.len() >= 5 {
+                Some(GpuStats {
+                    name: parts[0].to_string(),
+                    memory_used: parts[1].parse().unwrap_or(0),
+                    memory_total: parts[2].parse().unwrap_or(0),
+                    utilization: parts[3].parse().unwrap_or(0),
+                    temperature: parts[4].parse().unwrap_or(0),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+struct GpuStats {
+    name: String,
+    memory_used: u32,
+    memory_total: u32,
+    utilization: u32,
+    temperature: u32,
+}
+
 struct App {
     input: String,
     messages: Vec<(String, String)>, // (role, content)
@@ -64,6 +110,7 @@ struct App {
     input_history: Vec<String>,
     history_index: Option<usize>,
     current_input_backup: String,
+    gpu_stats: Vec<GpuStats>,
 }
 
 impl App {
@@ -120,6 +167,7 @@ impl App {
             input_history: vec![],
             history_index: None,
             current_input_backup: String::new(),
+            gpu_stats: vec![],
         };
 
         // Add system message with agent info
@@ -391,12 +439,20 @@ async fn run_app<B: ratatui::backend::Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
 ) -> Result<()> {
+    let mut gpu_update_counter = 0;
     loop {
         terminal.draw(|f| ui(f, app))?;
 
         // Update spinner animation when processing
         if app.processing {
             app.spinner_state = (app.spinner_state + 1) % 10;
+        }
+
+        // Update GPU stats every 1 second (10 iterations * 100ms)
+        gpu_update_counter += 1;
+        if gpu_update_counter >= 10 {
+            app.gpu_stats = fetch_gpu_stats();
+            gpu_update_counter = 0;
         }
 
         if event::poll(std::time::Duration::from_millis(100))? {
@@ -464,13 +520,21 @@ fn ui(f: &mut Frame, app: &App) {
         return;
     }
 
+    // Calculate GPU panel height based on number of GPUs (0 if none detected)
+    let gpu_height = if app.gpu_stats.is_empty() {
+        0
+    } else {
+        (app.gpu_stats.len() as u16 * 2) + 2 // 2 lines per GPU + 2 for borders
+    };
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),      // Header
-            Constraint::Min(5),          // Messages (reduced from 10 for better resize)
+            Constraint::Min(5),          // Messages
             Constraint::Length(3),       // Input
             Constraint::Length(3),       // Status
+            Constraint::Length(gpu_height), // GPU stats (dynamic)
         ])
         .split(size);
 
@@ -599,4 +663,68 @@ fn ui(f: &mut Frame, app: &App) {
                 })
         );
     f.render_widget(status, chunks[3]);
+
+    // GPU stats (if available)
+    if !app.gpu_stats.is_empty() {
+        let gpu_lines: Vec<Line> = app.gpu_stats.iter().enumerate().flat_map(|(idx, gpu)| {
+            let mem_percent = if gpu.memory_total > 0 {
+                (gpu.memory_used as f64 / gpu.memory_total as f64 * 100.0) as u32
+            } else {
+                0
+            };
+
+            let mem_color = if mem_percent >= 90 {
+                Color::Red
+            } else if mem_percent >= 75 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+
+            let temp_color = if gpu.temperature >= 80 {
+                Color::Red
+            } else if gpu.temperature >= 70 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+
+            vec![
+                Line::from(vec![
+                    Span::styled(
+                        format!("GPU{}: ", idx),
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        &gpu.name,
+                        Style::default().fg(Color::White),
+                    ),
+                ]),
+                Line::from(vec![
+                    Span::styled(
+                        format!("  VRAM: {}/{}MB ({}%) ", gpu.memory_used, gpu.memory_total, mem_percent),
+                        Style::default().fg(mem_color),
+                    ),
+                    Span::styled(
+                        format!("│ Load: {}% ", gpu.utilization),
+                        Style::default().fg(if gpu.utilization >= 80 { Color::Green } else { Color::Gray }),
+                    ),
+                    Span::styled(
+                        format!("│ Temp: {}°C", gpu.temperature),
+                        Style::default().fg(temp_color),
+                    ),
+                ]),
+            ]
+        }).collect();
+
+        let gpu_widget = Paragraph::new(gpu_lines)
+            .style(Style::default().fg(Color::White))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("🎮 GPU Stats")
+                    .border_style(Style::default().fg(Color::Cyan))
+            );
+        f.render_widget(gpu_widget, chunks[4]);
+    }
 }
