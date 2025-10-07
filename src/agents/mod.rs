@@ -116,7 +116,7 @@ impl Agent {
         let default = Agent {
             name: "default".to_string(),
             description: "General-purpose coding assistant".to_string(),
-            preferred_preset: Some("qwen3-14b-instant".to_string()),  // Fast, 28k context
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),  // Fast MoE, 42k context
             system_prompt: r#"You are Vork, an AI coding assistant powered by a local LLM. Your purpose is to help with software development tasks.
 
 You have access to the following tools:
@@ -157,7 +157,7 @@ You should be proactive in using tools to help solve problems. Don't just sugges
         let rust_expert = Agent {
             name: "rust-expert".to_string(),
             description: "Rust programming specialist".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),  // Best quality + speed
             system_prompt: r#"You are a Rust programming expert. You specialize in:
 - Writing idiomatic, safe Rust code
 - Using the borrow checker effectively
@@ -189,7 +189,7 @@ Always use the available tools to read existing code, make changes, and run test
         let reviewer = Agent {
             name: "reviewer".to_string(),
             description: "Code review specialist - finds bugs and suggests improvements".to_string(),
-            preferred_preset: Some("qwen3-14b-large-context".to_string()),  // Large context for full file reviews
+            preferred_preset: Some("qwen3-14b-large-context".to_string()),  // 72k context for massive file reviews
             system_prompt: r#"You are a meticulous code reviewer. Your job is to:
 - Find potential bugs and security issues
 - Suggest performance improvements
@@ -220,7 +220,7 @@ Use tools to read files and search for patterns. Be thorough but constructive."#
         let documenter = Agent {
             name: "documenter".to_string(),
             description: "Documentation specialist - writes clear docs and comments".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),  // Fast + quality
             system_prompt: r#"You are a documentation specialist. You excel at:
 - Writing clear, comprehensive documentation
 - Adding helpful code comments
@@ -251,7 +251,7 @@ Use tools to read files and add documentation where needed."#.to_string(),
         let debugger = Agent {
             name: "debugger".to_string(),
             description: "Debugging specialist - finds and fixes bugs systematically".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),  // Fast + smart reasoning
             system_prompt: r#"You are a debugging expert. You systematically:
 - Analyze error messages and stack traces
 - Identify root causes of bugs
@@ -283,7 +283,7 @@ Use tools to read code, search for patterns, run tests, and apply fixes."#.to_st
         let auditor = Agent {
             name: "code-auditor".to_string(),
             description: "Code quality auditor - finds stubs, poor implementations, and compliance issues".to_string(),
-            preferred_preset: Some("qwen3-14b-large-context".to_string()),  // Large context for whole-codebase audits
+            preferred_preset: Some("qwen3-14b-large-context".to_string()),  // 72k context for whole-codebase audits
             system_prompt: r#"You are a meticulous code auditor specializing in quality assurance and compliance. Your mission is to identify every single issue in the codebase with EXTREME DETAIL.
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -413,7 +413,7 @@ Be thorough, verbose, and detailed. Flag EVERYTHING that needs attention."#.to_s
         let reverse_engineer = Agent {
             name: "reverse-engineer".to_string(),
             description: "Binary reverse engineering specialist - uses radare2, Ghidra, and other RE tools".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),  // Best reasoning + speed
             system_prompt: r#"You are an expert reverse engineer specializing in binary analysis and decompilation. Your expertise includes:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -484,7 +484,7 @@ Use tools to execute r2, ghidra, objdump, and other RE utilities. Always provide
         let code_editor = Agent {
             name: "code-editor".to_string(),
             description: "Precision code editor - makes targeted, surgical changes to existing code".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a precision code editor. You excel at making targeted, surgical modifications to existing codebases. Your approach:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -540,7 +540,7 @@ You ARE for:
         let release_manager = Agent {
             name: "release-manager".to_string(),
             description: "Release engineering specialist - manages versioning, changelogs, and deployments".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a release engineering specialist. You manage the entire release lifecycle from versioning to deployment. Your responsibilities:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -605,7 +605,7 @@ Use tools to:
         let performance_optimizer = Agent {
             name: "performance-optimizer".to_string(),
             description: "Performance optimization specialist - profiles and optimizes for speed and efficiency".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a performance optimization expert. You identify bottlenecks and optimize code for maximum efficiency. Your expertise:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -681,7 +681,7 @@ Always provide before/after benchmarks and explain the optimization."#.to_string
         let security_auditor = Agent {
             name: "security-auditor".to_string(),
             description: "Security specialist - finds vulnerabilities and ensures secure coding practices".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a security auditing specialist. You identify vulnerabilities and ensure code follows security best practices. Your focus:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -766,7 +766,7 @@ Always prioritize findings by exploitability and impact."#.to_string(),
         let test_writer = Agent {
             name: "test-writer".to_string(),
             description: "Test engineering specialist - writes comprehensive unit, integration, and E2E tests".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a test engineering specialist. You write comprehensive, maintainable tests that ensure code quality. Your expertise:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -851,7 +851,7 @@ Always ensure tests are valuable, maintainable, and actually test what they clai
         let devops = Agent {
             name: "devops".to_string(),
             description: "DevOps specialist - manages CI/CD, infrastructure, containers, and deployment automation".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are a DevOps engineer. You automate infrastructure, deployment, and operational processes. Your expertise:
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
@@ -1013,7 +1013,7 @@ Example response format:
         let template = Agent {
             name: "template".to_string(),
             description: "Template for creating new agents - copy and customize this".to_string(),
-            preferred_preset: None,
+            preferred_preset: Some("qwen3-30b-max-gpu".to_string()),
             system_prompt: r#"You are [AGENT_NAME]. You specialize in [SPECIALIZATION].
 
 CRITICAL: All user paths are WORKSPACE-RELATIVE by default.
