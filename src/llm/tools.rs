@@ -162,12 +162,11 @@ pub async fn execute_tool(
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
 
-            eprintln!("📖 Reading file: {}", path);
-
             let content = fs::read_to_string(path)
                 .with_context(|| format!("Failed to read file: {}", path))?;
 
-            Ok(content)
+            let line_count = content.lines().count();
+            Ok(format!("📖 Read {} lines from {}\n\n{}", line_count, path, content))
         }
         "write_file" => {
             let path = arguments["path"]
@@ -177,12 +176,10 @@ pub async fn execute_tool(
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'content' parameter"))?;
 
-            eprintln!("✏️  Writing file: {}", path);
-
             // Check approval
             if let Some(approval) = approval_system {
                 if !approval.should_approve_write(path)? {
-                    return Ok(format!("Write to {} was denied by user", path));
+                    return Ok(format!("❌ Write to {} was denied by user", path));
                 }
             }
 
@@ -195,15 +192,13 @@ pub async fn execute_tool(
             fs::write(path, content)
                 .with_context(|| format!("Failed to write file: {}", path))?;
 
-            eprintln!("✅ Wrote {} bytes to {}", content.len(), path);
-            Ok(format!("Successfully wrote {} bytes to {}", content.len(), path))
+            let line_count = content.lines().count();
+            Ok(format!("✅ Wrote {} bytes ({} lines) to {}", content.len(), line_count, path))
         }
         "list_files" => {
             let path = arguments["path"]
                 .as_str()
                 .unwrap_or(".");
-
-            eprintln!("📁 Listing directory: {}", path);
 
             let entries = fs::read_dir(path)
                 .with_context(|| format!("Failed to read directory: {}", path))?;
@@ -216,20 +211,17 @@ pub async fn execute_tool(
                 files.push(format!("{}{}", name, file_type));
             }
 
-            eprintln!("✅ Found {} items in {}", files.len(), path);
-            Ok(files.join("\n"))
+            Ok(format!("📁 Found {} items in {}:\n\n{}", files.len(), path, files.join("\n")))
         }
         "bash_exec" => {
             let command = arguments["command"]
                 .as_str()
                 .ok_or_else(|| anyhow::anyhow!("Missing 'command' parameter"))?;
 
-            eprintln!("⚡ Executing bash command: {}", command);
-
             // Check approval
             if let Some(approval) = approval_system {
                 if !approval.should_approve_bash(command)? {
-                    return Ok(format!("Command '{}' was denied by user", command));
+                    return Ok(format!("❌ Command '{}' was denied by user", command));
                 }
             }
 
@@ -243,14 +235,12 @@ pub async fn execute_tool(
             let stderr = String::from_utf8_lossy(&output.stderr);
 
             let exit_code = output.status.code().unwrap_or(-1);
-            if exit_code == 0 {
-                eprintln!("✅ Command completed successfully");
-            } else {
-                eprintln!("⚠️  Command exited with code {}", exit_code);
-            }
+            let status_icon = if exit_code == 0 { "✅" } else { "⚠️" };
 
             Ok(format!(
-                "Exit code: {}\n\nStdout:\n{}\n\nStderr:\n{}",
+                "{} Executed: {}\nExit code: {}\n\nStdout:\n{}\n\nStderr:\n{}",
+                status_icon,
+                command,
                 exit_code,
                 stdout,
                 stderr
@@ -264,8 +254,6 @@ pub async fn execute_tool(
                 .as_str()
                 .unwrap_or(".");
 
-            eprintln!("🔍 Searching for '{}' in {}", pattern, path);
-
             let output = Command::new("grep")
                 .arg("-r")
                 .arg("-n")
@@ -278,12 +266,10 @@ pub async fn execute_tool(
             let line_count = stdout.lines().count();
 
             if line_count > 0 {
-                eprintln!("✅ Found {} matches", line_count);
+                Ok(format!("🔍 Found {} matches for '{}' in {}:\n\n{}", line_count, pattern, path, stdout))
             } else {
-                eprintln!("ℹ️  No matches found");
+                Ok(format!("ℹ️  No matches found for '{}' in {}", pattern, path))
             }
-
-            Ok(stdout.to_string())
         }
         "web_search" => {
             let query = arguments["query"]
@@ -292,8 +278,6 @@ pub async fn execute_tool(
             let max_results = arguments["max_results"]
                 .as_u64()
                 .unwrap_or(5) as usize;
-
-            eprintln!("🌐 Searching web for: {}", query);
 
             // Use DuckDuckGo HTML search (no API key needed)
             let search_url = format!(
@@ -356,11 +340,9 @@ pub async fn execute_tool(
             }
 
             if results.is_empty() {
-                eprintln!("ℹ️  No search results found");
-                Ok("No results found".to_string())
+                Ok(format!("ℹ️  No search results found for '{}'", query))
             } else {
-                eprintln!("✅ Found {} search results", results.len());
-                Ok(results.join("\n---\n\n"))
+                Ok(format!("🌐 Found {} search results for '{}':\n\n{}", results.len(), query, results.join("\n---\n\n")))
             }
         }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
