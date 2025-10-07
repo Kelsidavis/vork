@@ -8,10 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- 🖼️ Image analysis tool with base64 encoding for vision-capable models
+- 📸 Support for PNG, JPG, JPEG, GIF, BMP, WebP image formats
 - 🔬 Online research agent with web search capability (DuckDuckGo)
 - 🌐 Web search tool for all agents to find documentation and solutions
 - 📊 Detailed file operation status messages (reading, writing, executing)
 - 🗂️ Workspace-relative path interpretation (e.g., /docs/ means ./docs/)
+- 🔍 Enhanced code-auditor with extreme verbosity and /docs/audit output
 - 15 specialized AI agents with auto-selection (added researcher)
 - Beautiful TUI interface powered by ratatui
 - llama.cpp integration with auto-start server

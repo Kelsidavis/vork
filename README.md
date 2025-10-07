@@ -19,7 +19,7 @@
 - 🎨 **Beautiful TUI Interface** - Ratatui-based terminal UI with custom colors per agent
 - 🤖 **15 Specialized AI Agents** - Expert agents for different coding tasks
 - 🎯 **Smart Agent Selection** - Automatically picks the right agent based on your task
-- 🔧 **Tool Integration** - File operations, bash commands, code search, web research
+- 🔧 **Tool Integration** - File operations, bash commands, code search, web research, image analysis
 - 🚀 **Auto-Start Server** - Automatically manages llama-server lifecycle
 - 💾 **Session Management** - Save and resume conversations
 - ⚡ **Performance Metrics** - Real-time tokens/second display

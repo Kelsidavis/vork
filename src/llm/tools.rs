@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::fs;
 use std::process::Command;
+use base64::{Engine as _, engine::general_purpose};
 
 #[derive(Debug, Clone, Serialize)]
 #[allow(dead_code)]
@@ -145,6 +146,27 @@ pub fn get_available_tools() -> Vec<serde_json::Value> {
                         }
                     },
                     "required": ["query"]
+                }
+            }
+        }),
+        json!({
+            "type": "function",
+            "function": {
+                "name": "analyze_image",
+                "description": "Analyze an image file and describe its contents. Supports common formats: PNG, JPG, JPEG, GIF, BMP, WebP. Returns base64-encoded image data for vision-capable models.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to the image file to analyze"
+                        },
+                        "question": {
+                            "type": "string",
+                            "description": "Optional specific question about the image (e.g., 'What text is visible?', 'Describe the UI layout')"
+                        }
+                    },
+                    "required": ["path"]
                 }
             }
         }),
@@ -344,6 +366,53 @@ pub async fn execute_tool(
             } else {
                 Ok(format!("🌐 Found {} search results for '{}':\n\n{}", results.len(), query, results.join("\n---\n\n")))
             }
+        }
+        "analyze_image" => {
+            let path = arguments["path"]
+                .as_str()
+                .ok_or_else(|| anyhow::anyhow!("Missing 'path' parameter"))?;
+            let question = arguments["question"]
+                .as_str()
+                .map(|s| s.to_string());
+
+            // Read image file
+            let image_data = fs::read(path)
+                .with_context(|| format!("Failed to read image file: {}", path))?;
+
+            // Detect image format from extension
+            let extension = std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+
+            let mime_type = match extension.as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "bmp" => "image/bmp",
+                "webp" => "image/webp",
+                _ => "image/png", // default
+            };
+
+            // Encode to base64
+            let base64_data = general_purpose::STANDARD.encode(&image_data);
+
+            // Create data URL
+            let data_url = format!("data:{};base64,{}", mime_type, base64_data);
+
+            let size_kb = image_data.len() / 1024;
+            let question_text = question.as_deref().unwrap_or("Please describe what you see in this image");
+
+            // Return formatted response with image data and context
+            Ok(format!(
+                "🖼️  Loaded image: {} ({} KB, {})\n\nQuestion: {}\n\n[IMAGE_DATA: {}]\n\nNote: This image has been loaded and encoded. If your model supports vision, it will analyze the image based on the question.",
+                path,
+                size_kb,
+                mime_type,
+                question_text,
+                data_url
+            ))
         }
         _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
     }

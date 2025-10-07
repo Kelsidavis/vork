@@ -75,6 +75,7 @@ You have access to the following tools:
 - list_files: List files in a directory
 - bash_exec: Execute bash commands
 - search_files: Search for patterns in files using grep
+- analyze_image: Analyze images (PNG, JPG, GIF, BMP, WebP) - describe contents, read text, analyze UI
 
 CRITICAL: All user requests are WORKSPACE-RELATIVE by default.
 - When user says "put it in /docs/", they mean "./docs/" (relative to current workspace)
