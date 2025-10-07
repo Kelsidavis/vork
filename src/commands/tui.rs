@@ -59,6 +59,9 @@ struct App {
     header_title: String,
     agent_explicitly_set: bool,
     first_message: bool,
+    input_history: Vec<String>,
+    history_index: Option<usize>,
+    current_input_backup: String,
 }
 
 impl App {
@@ -112,6 +115,9 @@ impl App {
             header_title: header_title.clone(),
             agent_explicitly_set: agent.is_some(),
             first_message: true,
+            input_history: vec![],
+            history_index: None,
+            current_input_backup: String::new(),
         };
 
         // Add system message with agent info
@@ -156,6 +162,12 @@ impl App {
         }
 
         self.messages.push(("user".to_string(), user_message.clone()));
+
+        // Add to input history
+        self.input_history.push(user_message.clone());
+        self.history_index = None;
+        self.current_input_backup.clear();
+
         self.input.clear();
         self.processing = true;
 
@@ -258,6 +270,40 @@ impl App {
 
         Ok(())
     }
+
+    fn history_prev(&mut self) {
+        if self.input_history.is_empty() {
+            return;
+        }
+
+        match self.history_index {
+            None => {
+                // First time navigating history, save current input
+                self.current_input_backup = self.input.clone();
+                self.history_index = Some(self.input_history.len() - 1);
+                self.input = self.input_history[self.history_index.unwrap()].clone();
+            }
+            Some(index) => {
+                if index > 0 {
+                    self.history_index = Some(index - 1);
+                    self.input = self.input_history[self.history_index.unwrap()].clone();
+                }
+            }
+        }
+    }
+
+    fn history_next(&mut self) {
+        if let Some(index) = self.history_index {
+            if index < self.input_history.len() - 1 {
+                self.history_index = Some(index + 1);
+                self.input = self.input_history[self.history_index.unwrap()].clone();
+            } else {
+                // Reached the end, restore backup
+                self.history_index = None;
+                self.input = self.current_input_backup.clone();
+            }
+        }
+    }
 }
 
 pub async fn execute(server_url: Option<String>, model: Option<String>, agent_name: Option<String>) -> Result<()> {
@@ -341,11 +387,15 @@ async fn run_app<B: ratatui::backend::Backend>(
                         KeyCode::Char(c) => {
                             if !app.processing {
                                 app.input.push(c);
+                                // Reset history navigation when typing
+                                app.history_index = None;
                             }
                         }
                         KeyCode::Backspace => {
                             if !app.processing {
                                 app.input.pop();
+                                // Reset history navigation when editing
+                                app.history_index = None;
                             }
                         }
                         KeyCode::Enter => {
@@ -357,10 +407,16 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
                         KeyCode::Up => {
-                            app.scroll = app.scroll.saturating_sub(1);
+                            if !app.processing {
+                                // Navigate to previous command in history
+                                app.history_prev();
+                            }
                         }
                         KeyCode::Down => {
-                            app.scroll = app.scroll.saturating_add(1);
+                            if !app.processing {
+                                // Navigate to next command in history
+                                app.history_next();
+                            }
                         }
                         _ => {}
                     }
