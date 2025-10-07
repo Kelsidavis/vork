@@ -475,6 +475,29 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - 📚 [llama.cpp Documentation](https://github.com/ggerganov/llama.cpp)
 - 💬 [Discussions](https://github.com/yourusername/vork/discussions)
 
+## 🖼️ Vision Support (Image Analysis)
+
+Vork supports analyzing images with vision-capable models! Perfect for:
+- 📸 Analyzing GUI screenshots and mockups
+- 🎨 Understanding UI/UX layouts
+- 📝 Reading text from images
+- 🔍 Describing visual content
+
+**Quick Setup:**
+```bash
+# 1. Download a vision model (LLaVA 1.6 recommended)
+wget https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/llava-v1.6-mistral-7b.Q4_K_M.gguf
+wget https://huggingface.co/cjpais/llava-v1.6-mistral-7b-gguf/resolve/main/mmproj-model-f16.gguf
+
+# 2. Update config.toml
+extra_args = "--mmproj /path/to/mmproj-model-f16.gguf"
+
+# 3. Use it!
+vork "analyze screenshot.png and describe the UI"
+```
+
+**📖 Full Guide:** See [docs/VISION_SETUP.md](docs/VISION_SETUP.md) for complete setup instructions, model recommendations, and usage examples.
+
 ## 🆚 Comparison: Vork vs OpenAI Codex
 
 | Feature | OpenAI Codex | Vork |
