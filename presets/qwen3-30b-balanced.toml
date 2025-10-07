@@ -1,0 +1,45 @@
+# Qwen3 Coder 30B - Large Context Configuration
+# MoE architecture: 128 experts, 8 active per token
+# Model: 16.4GB (split GPU+CPU), KV cache: ~7GB, Total: ~26GB (91% dual GPU)
+# Provides 72k context (same as 14B) at 40 tok/s (vs 14B at ~30 tok/s)
+
+default_backend = "llamacpp"
+
+[assistant]
+server_url = "http://localhost:8080"
+model = "Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+require_git_repo = false
+
+[llamacpp]
+enabled = true
+models_dir = "/media/k/vbox/models/Qwen3"
+binary_path = "/home/k/llama.cpp/build/bin/llama-server"
+context_size = 73728  # 72k context - matches 14B large-context (96k = OOM)
+context_limit = 69632  # Compact when conversation exceeds this
+ngl = 40  # 40/48 layers on GPU, 8 on CPU for VRAM savings
+threads = 20
+batch_size = 512
+parallel = 4
+cache_type_k = "bf16"
+cache_type_v = "bf16"
+
+# Startup command:
+# /home/k/llama.cpp/build/bin/llama-server \
+#   -m /media/k/vbox/models/Qwen3/Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf \
+#   --host 0.0.0.0 --port 8080 \
+#   -c 73728 -ngl 40 -t 20 -b 512 --parallel 4 \
+#   --cache-type-k bf16 --cache-type-v bf16 --jinja
+
+# Benefits:
+# - 72k context (1.7x larger than 42k, same as 14B large-context)
+# - Still uses MoE speed advantage (8/128 experts)
+# - CPU offload: 8 layers on CPU, 40 on GPU
+# - Trade: 3x slower than 42k all-GPU (40 vs 121 tok/s)
+# - Better quality: 30B model > 14B at same context size
+# - Perfect for: code review, large file analysis, complex refactoring
+
+[ollama]
+enabled = true
+api_url = "http://localhost:11434"

@@ -1,0 +1,44 @@
+# Qwen3 Coder 30B - Ultra Context Configuration
+# MoE architecture: 128 experts, 8 active per token
+# Aggressive CPU offload for maximum context window
+# Model: split GPU+CPU, KV cache: ~12GB, optimized for huge contexts
+
+default_backend = "llamacpp"
+
+[assistant]
+server_url = "http://localhost:8080"
+model = "Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf"
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+require_git_repo = false
+
+[llamacpp]
+enabled = true
+models_dir = "/media/k/vbox/models/Qwen3"
+binary_path = "/home/k/llama.cpp/build/bin/llama-server"
+context_size = 131072  # 128k context - maximum practical with CPU offload
+context_limit = 122880  # Compact when conversation exceeds this
+ngl = 30  # 30/48 layers on GPU, 18 on CPU for huge KV cache
+threads = 20
+batch_size = 512
+parallel = 4
+cache_type_k = "bf16"
+cache_type_v = "bf16"
+
+# Startup command:
+# /home/k/llama.cpp/build/bin/llama-server \
+#   -m /media/k/vbox/models/Qwen3/Qwen3-Coder-30B-A3B-Instruct-Q5_K_S.gguf \
+#   --host 0.0.0.0 --port 8080 \
+#   -c 131072 -ngl 30 -t 20 -b 512 --parallel 4 \
+#   --cache-type-k bf16 --cache-type-v bf16 --jinja
+
+# Benefits:
+# - 128k context (3x larger than 42k, 1.8x larger than 72k)
+# - Still uses MoE speed advantage (8/128 experts)
+# - Aggressive CPU offload: 18 layers on CPU, 30 on GPU
+# - Trade: slower inference for massive context capacity
+# - Perfect for: entire codebases, documentation analysis, architectural review
+
+[ollama]
+enabled = true
+api_url = "http://localhost:11434"

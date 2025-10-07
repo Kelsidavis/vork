@@ -1,7 +1,7 @@
 # Qwen3 Coder 30B - Maximum GPU Utilization
 # MoE architecture: 128 experts, 8 active per token
 # Model: 20GB, KV cache: ~6.7GB, Total: ~26.7GB (96% dual GPU)
-# Provides exceptional speed (9.6 ms/tok) + large context (42k)
+# Provides exceptional speed (121 tok/s) + large context (42k)
 
 default_backend = "llamacpp"
 
@@ -16,7 +16,7 @@ require_git_repo = false
 enabled = true
 models_dir = "/media/k/vbox/models/Qwen3"
 binary_path = "/home/k/llama.cpp/build/bin/llama-server"
-context_size = 43008  # 42k context - maximum for dual GPU setup
+context_size = 43008  # 42k context - stable all-GPU
 context_limit = 40960  # Compact when conversation exceeds this
 ngl = 49  # All layers on GPU
 threads = 20

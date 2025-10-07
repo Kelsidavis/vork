@@ -329,9 +329,9 @@ fn print_summary(results: &[PresetBenchmark]) {
             .count() as f64;
 
         let use_case = match preset.name.as_str() {
-            n if n.contains("instant") => "Fast responses",
-            n if n.contains("large-context") => "Large files",
-            n if n.contains("30b") || n.contains("max") => "Complex reasoning",
+            n if n.contains("fast") => "Speed priority",
+            n if n.contains("balanced") => "Balanced",
+            n if n.contains("extended") => "Max context",
             _ => "General purpose",
         };
 
@@ -444,17 +444,17 @@ fn save_benchmark_results(results: &[PresetBenchmark]) -> Result<()> {
             avg_lat_a.partial_cmp(&avg_lat_b).unwrap()
         })
         .map(|p| p.name.clone())
-        .unwrap_or_else(|| "qwen3-14b-instant".to_string());
+        .unwrap_or_else(|| "qwen3-30b-fast".to_string());
 
     // Find largest context
     let largest_context = results.iter()
         .max_by_key(|r| r.context_size)
         .map(|p| p.name.clone())
-        .unwrap_or_else(|| "qwen3-14b-large-context".to_string());
+        .unwrap_or_else(|| "qwen3-30b-extended".to_string());
 
     // Find best for reasoning (30B model or fallback to fastest)
     let best_reasoning = results.iter()
-        .find(|r| r.name.contains("30"))
+        .find(|r| r.name.contains("30b"))
         .map(|p| p.name.clone())
         .unwrap_or_else(|| fastest.clone());
 

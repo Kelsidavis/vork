@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
+use arboard::Clipboard;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers},
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -9,7 +10,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
 use std::env;
@@ -122,6 +123,7 @@ struct App {
     input: String,
     messages: Vec<(String, String)>, // (role, content)
     scroll: u16,
+    input_scroll: u16,  // Vertical scroll offset for input box
     session: Session,
     client: LlamaClient,
     approval_system: ApprovalSystem,
@@ -213,6 +215,7 @@ impl App {
             input: String::new(),
             messages: vec![],
             scroll: 0,
+            input_scroll: 0,
             session,
             client,
             approval_system,
@@ -252,12 +255,41 @@ impl App {
         app
     }
 
-    async fn send_message(&mut self) -> Result<()> {
+    // Prepare UI for sending message (synchronous part)
+    fn prepare_send_message(&mut self) {
         if self.input.trim().is_empty() {
-            return Ok(());
+            return;
         }
 
         let user_message = self.input.clone();
+
+        // Add user message to display immediately
+        self.messages.push(("user".to_string(), user_message.clone()));
+
+        // Add to input history
+        self.input_history.push(user_message);
+        self.history_index = None;
+        self.current_input_backup.clear();
+
+        // Clear input and mark as processing
+        self.input.clear();
+        self.input_scroll = 0;
+        self.processing = true;
+
+        // Add immediate "thinking" feedback
+        self.messages.push((
+            "system".to_string(),
+            "💭 Thinking...".to_string(),
+        ));
+
+        // Auto-scroll to bottom so user sees the messages
+        self.scroll = u16::MAX;
+    }
+
+    // Do the actual LLM work (async part)
+    async fn do_send_message(&mut self) -> Result<()> {
+        // Get the last user message (the one we just added in prepare)
+        let user_message = self.input_history.last().unwrap().clone();
 
         // Auto-select agent based on first message if no agent was explicitly set
         if self.first_message && !self.agent_explicitly_set {
@@ -314,22 +346,6 @@ impl App {
             }
             self.first_message = false;
         }
-
-        self.messages.push(("user".to_string(), user_message.clone()));
-
-        // Add to input history
-        self.input_history.push(user_message.clone());
-        self.history_index = None;
-        self.current_input_backup.clear();
-
-        self.input.clear();
-        self.processing = true;
-
-        // Add immediate "thinking" feedback
-        self.messages.push((
-            "system".to_string(),
-            "💭 Thinking...".to_string(),
-        ));
 
         let start_time = std::time::Instant::now();
         let mut total_tokens = 0usize;
@@ -483,6 +499,7 @@ impl App {
 
     async fn handle_compact_command(&mut self) -> Result<()> {
         self.input.clear();
+        self.input_scroll = 0;
 
         let msg_count_before = self.session.conversation.messages.len();
         let (used_before, _, _) = self.session.conversation.get_context_usage();
@@ -584,6 +601,7 @@ impl App {
 
     async fn handle_model_command(&mut self) -> Result<()> {
         self.input.clear();
+        self.input_scroll = 0;
 
         if self.available_presets.is_empty() {
             self.messages.push((
@@ -693,6 +711,7 @@ impl App {
 
     fn handle_copy_command(&mut self) -> Result<()> {
         self.input.clear();
+        self.input_scroll = 0;
 
         // Build the full conversation text
         let mut conversation_text = String::new();
@@ -752,11 +771,13 @@ impl App {
                 self.current_input_backup = self.input.clone();
                 self.history_index = Some(self.input_history.len() - 1);
                 self.input = self.input_history[self.history_index.unwrap()].clone();
+                self.input_scroll = 0;
             }
             Some(index) => {
                 if index > 0 {
                     self.history_index = Some(index - 1);
                     self.input = self.input_history[self.history_index.unwrap()].clone();
+                    self.input_scroll = 0;
                 }
             }
         }
@@ -767,10 +788,12 @@ impl App {
             if index < self.input_history.len() - 1 {
                 self.history_index = Some(index + 1);
                 self.input = self.input_history[self.history_index.unwrap()].clone();
+                self.input_scroll = 0;
             } else {
                 // Reached the end, restore backup
                 self.history_index = None;
                 self.input = self.current_input_backup.clone();
+                self.input_scroll = 0;
             }
         }
     }
@@ -898,12 +921,20 @@ async fn run_app<B: ratatui::backend::Backend>(
                                 } else if input == "/copy" {
                                     app.handle_copy_command()?;
                                 } else {
-                                    app.send_message().await?;
+                                    // Prepare UI for processing before async call
+                                    app.prepare_send_message();
+                                    // Force immediate redraw to show processing state
+                                    terminal.draw(|f| ui(f, app))?;
+                                    // Now do the async LLM work
+                                    app.do_send_message().await?;
                                 }
                             }
                         }
                         KeyCode::Up => {
-                            if app.model_selector_active {
+                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                // Ctrl+Up: Scroll input box up
+                                app.input_scroll = app.input_scroll.saturating_sub(1);
+                            } else if app.model_selector_active {
                                 // Navigate model selection
                                 if app.selected_preset_index > 0 {
                                     app.selected_preset_index -= 1;
@@ -914,7 +945,10 @@ async fn run_app<B: ratatui::backend::Backend>(
                             }
                         }
                         KeyCode::Down => {
-                            if app.model_selector_active {
+                            if key.modifiers.contains(KeyModifiers::CONTROL) {
+                                // Ctrl+Down: Scroll input box down
+                                app.input_scroll = app.input_scroll.saturating_add(1);
+                            } else if app.model_selector_active {
                                 // Navigate model selection
                                 if app.selected_preset_index < app.available_presets.len().saturating_sub(1) {
                                     app.selected_preset_index += 1;
@@ -969,6 +1003,14 @@ async fn run_app<B: ratatui::backend::Backend>(
                         event::MouseEventKind::ScrollDown => {
                             app.scroll = app.scroll.saturating_add(3);
                         }
+                        event::MouseEventKind::Down(MouseButton::Right) => {
+                            // Right-click paste from clipboard
+                            if let Ok(mut clipboard) = Clipboard::new() {
+                                if let Ok(text) = clipboard.get_text() {
+                                    app.input.push_str(&text);
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -1001,7 +1043,7 @@ fn ui(f: &mut Frame, app: &App) {
         .constraints([
             Constraint::Length(3),      // Header
             Constraint::Min(5),          // Messages
-            Constraint::Length(3),       // Input
+            Constraint::Length(4),       // Input (2 text rows + borders)
             Constraint::Length(3),       // Status
             Constraint::Length(3),       // Context usage
             Constraint::Length(gpu_height), // GPU stats (dynamic)
@@ -1124,22 +1166,24 @@ fn ui(f: &mut Frame, app: &App) {
     let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let (input_text, input_style, input_title, border_color) = if app.processing {
         (
-            format!("{} AI is thinking...", spinner_frames[app.spinner_state]),
+            format!("{} AI is analyzing your request and generating response...", spinner_frames[app.spinner_state]),
             Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-            "⏳ Processing... (please wait)",
+            "⏳ PROCESSING - Please wait, response incoming...",
             Color::Yellow,
         )
     } else {
         (
             format!("💬 {}", app.input),
             Style::default().fg(Color::White),
-            "✅ Ready (/compact /model /copy | Ctrl+C to exit)",
+            "✅ Ready (Ctrl+↑↓ scroll input | Right-click paste | /compact /model /copy)",
             Color::Green,
         )
     };
 
     let input = Paragraph::new(input_text)
         .style(input_style)
+        .wrap(Wrap { trim: false })
+        .scroll((app.input_scroll, 0))  // Vertical scroll support
         .block(
             Block::default()
                 .borders(Borders::ALL)
