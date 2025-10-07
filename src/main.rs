@@ -117,6 +117,8 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Benchmark model presets for speed and quality
+    Benchmark,
 }
 
 #[tokio::main]
@@ -182,6 +184,9 @@ async fn main() -> Result<()> {
             json,
         } => {
             commands::exec::execute(&prompt, cli.server, cli.model, full_auto, json).await?;
+        }
+        Commands::Benchmark => {
+            commands::benchmark::execute().await?;
         }
     }
 

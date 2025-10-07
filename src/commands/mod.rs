@@ -11,3 +11,4 @@ pub mod exec;
 pub mod tui;
 pub mod setup;
 pub mod agents;
+pub mod benchmark;
